@@ -65,6 +65,20 @@ public:
         double sampleRate,
         int bitDepth = 16) const;
 
+    /**
+        Compute checksum of raw PCM data in an AudioBuffer.
+
+        This computes a deterministic checksum of the raw audio samples, not any
+        file format container, ensuring consistent verification across platforms.
+
+        @param buffer The audio buffer to hash
+        @param bitDepth The bit depth to use for quantization (16, 24, or 32)
+        @returns Checksum as a hexadecimal string
+    */
+    [[nodiscard]] juce::String computePCMHash(
+        const juce::AudioBuffer<float>& buffer,
+        int bitDepth = 16) const;
+
 private:
     bool initialised { false };
 };

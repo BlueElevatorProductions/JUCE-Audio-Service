@@ -47,6 +47,9 @@ endif()
 
 add_library(JuceAudioService
     src/AudioService.cpp
+    src/VoiceGenerator.cpp
+    src/AudioFileSource.cpp
+    src/OfflineRenderer.cpp
 )
 
 add_library(JuceAudioService::JuceAudioService ALIAS JuceAudioService)
