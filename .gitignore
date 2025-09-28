@@ -1,0 +1,11 @@
+# Build output
+/build/
+cmake-build-*/
+
+# IDE files
+.DS_Store
+.idea/
+.vscode/
+
+# Generated files
+compile_commands.json

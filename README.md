@@ -1,5 +1,8 @@
 JUCE-Audio-Service
 
+![Build Status](https://img.shields.io/badge/ci-pending-lightgrey)
+![License](https://img.shields.io/badge/license-TBD-lightgrey)
+
 JUCE-based backend for audio playback, transport, and editing.
 Integrates with text-first editors (Google Docs, Lexical) via JSON EDLs and bridge layers (IPC, gRPC, WebSockets). Built for podcasters and audio engineers alike.
 
@@ -22,23 +25,31 @@ git clone https://github.com/<your-org>/JUCE-Audio-Service.git
 cd JUCE-Audio-Service
 
 
-	2.	Build the JUCE backend
+	2.	Configure & build
 
-mkdir -p build && cd build
-cmake .. -DUSE_JUCE=ON
-make
+./scripts/build.sh Debug
 
+	3.	Run the test suite
+
+./scripts/test.sh Debug
+
+Set `JUCE_SOURCE_DIR=/path/to/JUCE` to reuse an existing checkout and avoid fetching during configure steps.
 
 
 ⸻
 
 📂 Repo Structure
 
-/src         → JUCE backend sources
-/include     → Headers
-/build       → CMake build outputs
-/docs        → Specs, diagrams
-/tests       → Unit + integration tests
+/CMakeLists.txt  → Root CMake project definition
+/src             → JUCE backend sources
+/include         → Public headers
+/proto           → Protocol buffer definitions and RPC contracts
+/tests           → Unit and integration tests
+/tools           → Developer utilities and helper binaries
+/scripts         → Build & CI helper scripts
+/docs            → Specs, diagrams, and architecture notes
+/fixtures        → Sample assets for tests and documentation
+/.github/workflows → Continuous integration pipelines
 
 
 ⸻
