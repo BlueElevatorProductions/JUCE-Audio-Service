@@ -1,16 +1,18 @@
 #pragma once
 
 #include <juce_core/juce_core.h>
+#include <juce_audio_basics/juce_audio_basics.h>
+#include <juce_audio_formats/juce_audio_formats.h>
 
 namespace juceaudioservice
 {
 
 /**
-    Minimal JUCE-based audio service scaffold.
+    JUCE-based audio service with audio generation and file writing capabilities.
 
-    The class currently exposes a simple API surface that will evolve as the
-    project grows. It provides a JUCE-friendly identifier that ensures JUCE
-    headers are wired correctly in both the library and the test harness.
+    The class provides audio synthesis and file output functionality for testing
+    and audio processing applications. It supports sine wave generation and
+    writing audio files in various formats.
 */
 class AudioService
 {
@@ -32,6 +34,36 @@ public:
         resource acquisition tasks.
     */
     void initialise();
+
+    /**
+        Generate a sine wave and return it as an AudioBuffer.
+
+        @param frequency The frequency of the sine wave in Hz
+        @param durationSeconds The duration of the sine wave in seconds
+        @param sampleRate The sample rate in Hz
+        @param numChannels The number of audio channels
+        @returns An AudioBuffer containing the generated sine wave
+    */
+    [[nodiscard]] juce::AudioBuffer<float> generateSineWave(
+        double frequency,
+        double durationSeconds,
+        double sampleRate,
+        int numChannels = 1) const;
+
+    /**
+        Write an AudioBuffer to an audio file.
+
+        @param buffer The audio buffer to write
+        @param outputFile The file to write to
+        @param sampleRate The sample rate of the audio
+        @param bitDepth The bit depth (16, 24, or 32)
+        @returns true if the file was written successfully, false otherwise
+    */
+    bool writeAudioFile(
+        const juce::AudioBuffer<float>& buffer,
+        const juce::File& outputFile,
+        double sampleRate,
+        int bitDepth = 16) const;
 
 private:
     bool initialised { false };

@@ -60,6 +60,7 @@ target_link_libraries(JuceAudioService
     PUBLIC
         juce::juce_core
         juce::juce_audio_basics
+        juce::juce_audio_formats
 )
 
 target_compile_features(JuceAudioService PUBLIC cxx_std_20)
@@ -69,6 +70,8 @@ target_compile_definitions(JuceAudioService
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
 )
+
+add_subdirectory(tools)
 
 if(JUCE_AUDIO_SERVICE_ENABLE_TESTS)
     enable_testing()

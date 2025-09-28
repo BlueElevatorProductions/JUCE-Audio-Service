@@ -3,6 +3,9 @@
 /out/
 cmake-build-*/
 
+# Test outputs (but keep golden reference files)
+/tests/data/output/
+
 # IDE files
 .DS_Store
 .idea/
