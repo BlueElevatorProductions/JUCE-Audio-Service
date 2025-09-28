@@ -19,22 +19,71 @@ Integrates with text-first editors (Google Docs, Lexical) via JSON EDLs and brid
 ⸻
 
 🛠️ Setup
+
+**Requirements:**
+- Apple Silicon Mac (arm64 only)
+- macOS 12.0 or later
+- Git LFS (for binary cache)
+- CMake 3.20+
+
 	1.	Clone the repo
 
 git clone https://github.com/<your-org>/JUCE-Audio-Service.git
 cd JUCE-Audio-Service
+git lfs install
+git submodule update --init --recursive
+
+	2.	Basic build (without gRPC)
+
+./scripts/build.sh Release
+
+	3.	Build with gRPC support
+
+./scripts/build.sh Release -DENABLE_GRPC=ON
+
+	4.	Run the test suite
+
+./scripts/test.sh Release
+
+	5.	Run gRPC tests (when enabled)
+
+cd build && ctest -L grpc
+
+**Note:** This project is Apple Silicon only. The first gRPC build will take longer as it downloads and caches dependencies via vcpkg. Subsequent builds use the local binary cache.
 
 
-	2.	Configure & build
+⸻
 
-./scripts/build.sh Debug
+🎯 gRPC Server Usage
 
-	3.	Run the test suite
+When built with `-DENABLE_GRPC=ON`, two additional executables are created:
 
-./scripts/test.sh Debug
+**Start the gRPC server:**
+```bash
+./build/audio_engine_server
+```
+Server listens on `localhost:50051` by default.
 
-Set `JUCE_SOURCE_DIR=/path/to/JUCE` to reuse an existing checkout and avoid fetching during configure steps.
+**Use the gRPC client CLI:**
+```bash
+# Test server connectivity
+./build/grpc_client_cli ping
 
+# Load an audio file
+./build/grpc_client_cli load /path/to/audio.wav
+
+# Render audio (full file)
+./build/grpc_client_cli render /path/to/input.wav /path/to/output.wav
+
+# Render audio segment (start at 1.0s, duration 5.0s)
+./build/grpc_client_cli render /path/to/input.wav /path/to/output.wav 1.0 5.0
+```
+
+**Implemented gRPC methods:**
+- `LoadFile`: Load and validate audio files
+- `Render`: Offline render with streaming progress updates
+- `UpdateEdl`: Placeholder (returns UNIMPLEMENTED)
+- `Subscribe`: Placeholder (returns UNIMPLEMENTED)
 
 ⸻
 

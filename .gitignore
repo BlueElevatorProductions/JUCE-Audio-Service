@@ -13,3 +13,10 @@ cmake-build-*/
 
 # Generated files
 compile_commands.json
+
+# vcpkg build artifacts (but keep cache)
+/third_party/vcpkg/buildtrees/
+/third_party/vcpkg/packages/
+/third_party/vcpkg/downloads/
+/third_party/vcpkg/installed/
+/vcpkg_installed/

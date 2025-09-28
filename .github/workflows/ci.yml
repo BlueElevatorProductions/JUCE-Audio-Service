@@ -2,12 +2,20 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, feature/grpc-cpp-with-cache-arm64 ]
   pull_request:
 
+env:
+  CMAKE_OSX_ARCHITECTURES: arm64
+  MACOSX_DEPLOYMENT_TARGET: 12.0
+  VCPKG_TARGET_TRIPLET: arm64-osx
+  VCPKG_HOST_TRIPLET: arm64-osx
+  VCPKG_BUILD_TYPE: release
+
 jobs:
-  build:
-    runs-on: macos-latest
+  build-basic:
+    name: Build without gRPC
+    runs-on: macos-14  # Apple Silicon runner
     strategy:
       matrix:
         build_type: [Debug, Release]
@@ -17,17 +25,59 @@ jobs:
         with:
           submodules: true
           fetch-depth: 0
+          lfs: true
 
-      - name: Configure CMake
+      - name: Install Git LFS
         run: |
-          cmake -S . -B build/${{ matrix.build_type }} -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          git lfs install
+          git lfs pull
 
-      - name: Build
+      - name: Configure CMake (ENABLE_GRPC=OFF)
         run: |
-          cmake --build build/${{ matrix.build_type }} --config ${{ matrix.build_type }}
+          ./scripts/build.sh ${{ matrix.build_type }}
 
       - name: Run tests
-        working-directory: build/${{ matrix.build_type }}
+        working-directory: build
         run: |
           ctest --output-on-failure -C ${{ matrix.build_type }}
+
+  build-grpc:
+    name: Build with gRPC
+    runs-on: macos-14  # Apple Silicon runner
+    strategy:
+      matrix:
+        build_type: [Release]  # Only Release for gRPC to save time
+    env:
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/third_party/vcpkg_cache
+      VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/third_party/vcpkg_cache,read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0
+          lfs: true
+
+      - name: Install Git LFS
+        run: |
+          git lfs install
+          git lfs pull
+
+      - name: Setup vcpkg cache directory
+        run: |
+          mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE"
+
+      - name: Configure CMake (ENABLE_GRPC=ON)
+        run: |
+          ./scripts/build.sh ${{ matrix.build_type }} -DENABLE_GRPC=ON
+
+      - name: Run tests
+        working-directory: build
+        run: |
+          ctest --output-on-failure -C ${{ matrix.build_type }}
+
+      - name: Run gRPC-specific tests
+        working-directory: build
+        run: |
+          ctest --output-on-failure -L grpc -C ${{ matrix.build_type }}
 

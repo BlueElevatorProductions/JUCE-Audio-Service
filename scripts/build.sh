@@ -1,11 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BUILD_TYPE=${1:-Debug}
-BUILD_DIR="build/${BUILD_TYPE}"
+cfg="${1:-Release}"
+shift || true
+
+# Source Apple Silicon environment and vcpkg configuration
+source "$(dirname "$0")/vcpkg_env.sh"
 
 # Ensure dependencies are available
 "$(dirname "$0")/get_deps.sh"
 
-cmake -S . -B "${BUILD_DIR}" -DCMAKE_BUILD_TYPE="${BUILD_TYPE}"
-cmake --build "${BUILD_DIR}" --config "${BUILD_TYPE}"
+cmake_args=(
+  -S .
+  -B build
+  -DCMAKE_BUILD_TYPE="$cfg"
+)
+
+# If caller passed -DENABLE_GRPC=ON anywhere, we provide the toolchain
+if printf '%s\n' "$@" | grep -q 'ENABLE_GRPC=ON'; then
+  cmake_args+=(-DCMAKE_TOOLCHAIN_FILE=third_party/vcpkg/scripts/buildsystems/vcpkg.cmake)
+fi
+
+cmake "${cmake_args[@]}" "$@"
+cmake --build build --config "$cfg" --parallel

@@ -8,6 +8,16 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(JUCE_AUDIO_SERVICE_ENABLE_TESTS "Build the JuceAudioService tests" ${PROJECT_IS_TOP_LEVEL})
 option(USE_LOCAL_JUCE "Use JUCE from third_party/JUCE" ON)
+option(ENABLE_GRPC "Build C++ gRPC server/client" OFF)
+
+# Enforce Apple Silicon only
+if(APPLE)
+    if(NOT CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
+        message(FATAL_ERROR "This project only supports Apple Silicon (arm64). Set CMAKE_OSX_ARCHITECTURES=arm64")
+    endif()
+elseif(ENABLE_GRPC)
+    message(FATAL_ERROR "gRPC support is only available on Apple Silicon macOS")
+endif()
 
 set(JUCE_ENABLE_MODULE_SOURCE_GROUPS ON CACHE BOOL "" FORCE)
 set(JUCE_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -45,6 +55,59 @@ else()
     endif()
 endif()
 
+# gRPC setup when enabled
+if(ENABLE_GRPC)
+    if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
+        set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/third_party/vcpkg/scripts/buildsystems/vcpkg.cmake" CACHE STRING "")
+    endif()
+
+    find_package(Protobuf REQUIRED)
+    find_package(gRPC REQUIRED)
+
+    # Proto generation
+    set(PROTO_FILES
+        ${CMAKE_SOURCE_DIR}/proto/audio_engine.proto
+    )
+
+    set(PROTO_GENERATED_DIR "${CMAKE_BINARY_DIR}/generated")
+    file(MAKE_DIRECTORY ${PROTO_GENERATED_DIR})
+
+    foreach(PROTO_FILE ${PROTO_FILES})
+        get_filename_component(PROTO_NAME ${PROTO_FILE} NAME_WE)
+        set(PROTO_SRCS "${PROTO_GENERATED_DIR}/${PROTO_NAME}.pb.cc")
+        set(PROTO_HDRS "${PROTO_GENERATED_DIR}/${PROTO_NAME}.pb.h")
+        set(GRPC_SRCS "${PROTO_GENERATED_DIR}/${PROTO_NAME}.grpc.pb.cc")
+        set(GRPC_HDRS "${PROTO_GENERATED_DIR}/${PROTO_NAME}.grpc.pb.h")
+
+        add_custom_command(
+            OUTPUT ${PROTO_SRCS} ${PROTO_HDRS} ${GRPC_SRCS} ${GRPC_HDRS}
+            COMMAND protobuf::protoc
+            ARGS --grpc_out ${PROTO_GENERATED_DIR}
+                 --cpp_out ${PROTO_GENERATED_DIR}
+                 -I ${CMAKE_SOURCE_DIR}/proto
+                 --plugin=protoc-gen-grpc=$<TARGET_FILE:gRPC::grpc_cpp_plugin>
+                 ${PROTO_FILE}
+            DEPENDS ${PROTO_FILE} protobuf::protoc gRPC::grpc_cpp_plugin
+            COMMENT "Generating protocol buffer and gRPC sources from ${PROTO_FILE}"
+        )
+
+        list(APPEND ALL_PROTO_SRCS ${PROTO_SRCS} ${GRPC_SRCS})
+        list(APPEND ALL_PROTO_HDRS ${PROTO_HDRS} ${GRPC_HDRS})
+    endforeach()
+
+    # Create a library for generated protobuf code
+    add_library(audio_engine_proto ${ALL_PROTO_SRCS} ${ALL_PROTO_HDRS})
+    target_link_libraries(audio_engine_proto
+        PUBLIC
+            protobuf::libprotobuf
+            gRPC::grpc++
+    )
+    target_include_directories(audio_engine_proto
+        PUBLIC
+            ${PROTO_GENERATED_DIR}
+    )
+endif()
+
 add_library(JuceAudioService
     src/AudioService.cpp
     src/VoiceGenerator.cpp
@@ -79,5 +142,27 @@ add_subdirectory(tools)
 if(JUCE_AUDIO_SERVICE_ENABLE_TESTS)
     enable_testing()
     add_subdirectory(tests)
+endif()
+
+# gRPC targets
+if(ENABLE_GRPC)
+    # gRPC server executable
+    add_executable(audio_engine_server
+        src/grpc_server.cpp
+    )
+    target_link_libraries(audio_engine_server
+        PRIVATE
+            JuceAudioService
+            audio_engine_proto
+    )
+
+    # gRPC client CLI executable
+    add_executable(grpc_client_cli
+        src/grpc_client_cli.cpp
+    )
+    target_link_libraries(grpc_client_cli
+        PRIVATE
+            audio_engine_proto
+    )
 endif()
 
