@@ -60,23 +60,40 @@ When built with `-DENABLE_GRPC=ON`, two additional executables are created:
 
 **Start the gRPC server:**
 ```bash
-./build/audio_engine_server
+# Start server on default port (50051)
+./build/bin/audio_engine_server
+
+# Start server on custom port
+./build/bin/audio_engine_server --port 50052
 ```
-Server listens on `localhost:50051` by default.
+Server listens on `0.0.0.0:50051` by default.
 
 **Use the gRPC client CLI:**
 ```bash
 # Test server connectivity
-./build/grpc_client_cli ping
+./build/tools/grpc_client_cli ping
 
-# Load an audio file
-./build/grpc_client_cli load /path/to/audio.wav
+# Load an audio file (new format)
+./build/tools/grpc_client_cli load --path /path/to/audio.wav
 
 # Render audio (full file)
-./build/grpc_client_cli render /path/to/input.wav /path/to/output.wav
+./build/tools/grpc_client_cli render --path /path/to/input.wav --out /path/to/output.wav
 
 # Render audio segment (start at 1.0s, duration 5.0s)
-./build/grpc_client_cli render /path/to/input.wav /path/to/output.wav 1.0 5.0
+./build/tools/grpc_client_cli render --path /path/to/input.wav --out /path/to/output.wav --start 1.0 --dur 5.0
+
+# Legacy format still supported
+./build/tools/grpc_client_cli load /path/to/audio.wav
+./build/tools/grpc_client_cli render /path/to/input.wav /path/to/output.wav 1.0 5.0
+```
+
+**Run automated smoke test:**
+```bash
+# Quick end-to-end test
+./scripts/smoke_test.sh
+
+# Use different port or config
+PORT=50052 CFG=Debug ./scripts/smoke_test.sh
 ```
 
 **Implemented gRPC methods:**

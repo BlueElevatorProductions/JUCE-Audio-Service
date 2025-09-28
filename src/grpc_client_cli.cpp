@@ -5,6 +5,7 @@
 #include <vector>
 #include <chrono>
 #include <iomanip>
+#include <algorithm>
 
 #include <grpcpp/grpcpp.h>
 #include "audio_engine.grpc.pb.h"
@@ -133,19 +134,37 @@ void printUsage(const char* programName) {
     std::cout << "Usage: " << programName << " [options] <command> [args...]" << std::endl;
     std::cout << std::endl;
     std::cout << "Options:" << std::endl;
-    std::cout << "  --server <address>  Server address (default: localhost:50051)" << std::endl;
+    std::cout << "  --addr <address>    Server address (default: localhost:50051)" << std::endl;
+    std::cout << "  --server <address>  Server address (alias for --addr)" << std::endl;
     std::cout << std::endl;
     std::cout << "Commands:" << std::endl;
-    std::cout << "  ping                          Test server connectivity" << std::endl;
-    std::cout << "  load <file>                   Load an audio file" << std::endl;
-    std::cout << "  render <input> <output>       Render loaded file to output" << std::endl;
-    std::cout << "  render <input> <output> <start> <duration>  Render with time window" << std::endl;
+    std::cout << "  ping                                         Test server connectivity" << std::endl;
+    std::cout << "  load --path <file>                          Load an audio file" << std::endl;
+    std::cout << "  render --path <input> --out <output>        Render full file" << std::endl;
+    std::cout << "  render --path <input> --out <output> --start <time> --dur <duration>  Render window" << std::endl;
+    std::cout << std::endl;
+    std::cout << "Legacy format (still supported):" << std::endl;
+    std::cout << "  load <file>" << std::endl;
+    std::cout << "  render <input> <output> [<start>] [<duration>]" << std::endl;
     std::cout << std::endl;
     std::cout << "Examples:" << std::endl;
-    std::cout << "  " << programName << " ping" << std::endl;
-    std::cout << "  " << programName << " load input.wav" << std::endl;
-    std::cout << "  " << programName << " render input.wav output.wav" << std::endl;
-    std::cout << "  " << programName << " render input.wav output.wav 1.0 5.0" << std::endl;
+    std::cout << "  " << programName << " --addr 127.0.0.1:50051 ping" << std::endl;
+    std::cout << "  " << programName << " load --path input.wav" << std::endl;
+    std::cout << "  " << programName << " render --path input.wav --out output.wav" << std::endl;
+    std::cout << "  " << programName << " render --path input.wav --out output.wav --start 1.0 --dur 5.0" << std::endl;
+}
+
+// Helper function to find named argument value
+std::string getNamedArg(const std::vector<std::string>& args, const std::string& name, const std::string& defaultValue = "") {
+    auto it = std::find(args.begin(), args.end(), name);
+    if (it != args.end() && std::next(it) != args.end()) {
+        return *std::next(it);
+    }
+    return defaultValue;
+}
+
+bool hasNamedArg(const std::vector<std::string>& args, const std::string& name) {
+    return std::find(args.begin(), args.end(), name) != args.end();
 }
 
 int main(int argc, char** argv) {
@@ -155,7 +174,7 @@ int main(int argc, char** argv) {
     // Parse command line arguments
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
-        if (arg == "--server" && i + 1 < argc) {
+        if ((arg == "--server" || arg == "--addr") && i + 1 < argc) {
             serverAddress = argv[++i];
         } else if (arg == "--help" || arg == "-h") {
             printUsage(argv[0]);
@@ -179,46 +198,99 @@ int main(int argc, char** argv) {
     if (command == "ping") {
         client.Ping();
     } else if (command == "load") {
-        if (args.size() != 2) {
-            std::cout << "Error: load command requires exactly one argument (file path)" << std::endl;
+        std::string filePath;
+
+        // Check for new format: load --path <file>
+        if (hasNamedArg(args, "--path")) {
+            filePath = getNamedArg(args, "--path");
+            if (filePath.empty()) {
+                std::cout << "Error: --path requires a file path argument" << std::endl;
+                return 1;
+            }
+        }
+        // Legacy format: load <file>
+        else if (args.size() == 2) {
+            filePath = args[1];
+        }
+        else {
+            std::cout << "Error: load command requires --path <file> or <file> argument" << std::endl;
             return 1;
         }
 
-        if (!std::filesystem::exists(args[1])) {
-            std::cout << "Error: file does not exist: " << args[1] << std::endl;
+        if (!std::filesystem::exists(filePath)) {
+            std::cout << "Error: file does not exist: " << filePath << std::endl;
             return 1;
         }
 
-        if (!client.LoadFile(args[1])) {
+        if (!client.LoadFile(filePath)) {
             return 1;
         }
     } else if (command == "render") {
-        if (args.size() < 3 || args.size() > 5) {
-            std::cout << "Error: render command requires 2-4 arguments: <input> <output> [<start>] [<duration>]" << std::endl;
-            return 1;
-        }
-
-        std::string inputFile = args[1];
-        std::string outputFile = args[2];
+        std::string inputFile, outputFile;
         double startTime = -1;
         double duration = -1;
 
-        if (args.size() >= 4) {
-            try {
-                startTime = std::stod(args[3]);
-            } catch (...) {
-                std::cout << "Error: invalid start time: " << args[3] << std::endl;
+        // Check for new format: render --path <input> --out <output> [--start <time>] [--dur <duration>]
+        if (hasNamedArg(args, "--path") && hasNamedArg(args, "--out")) {
+            inputFile = getNamedArg(args, "--path");
+            outputFile = getNamedArg(args, "--out");
+
+            if (inputFile.empty()) {
+                std::cout << "Error: --path requires a file path argument" << std::endl;
                 return 1;
+            }
+            if (outputFile.empty()) {
+                std::cout << "Error: --out requires a file path argument" << std::endl;
+                return 1;
+            }
+
+            std::string startStr = getNamedArg(args, "--start");
+            if (!startStr.empty()) {
+                try {
+                    startTime = std::stod(startStr);
+                } catch (...) {
+                    std::cout << "Error: invalid start time: " << startStr << std::endl;
+                    return 1;
+                }
+            }
+
+            std::string durStr = getNamedArg(args, "--dur");
+            if (!durStr.empty()) {
+                try {
+                    duration = std::stod(durStr);
+                } catch (...) {
+                    std::cout << "Error: invalid duration: " << durStr << std::endl;
+                    return 1;
+                }
             }
         }
+        // Legacy format: render <input> <output> [<start>] [<duration>]
+        else if (args.size() >= 3 && args.size() <= 5) {
+            inputFile = args[1];
+            outputFile = args[2];
 
-        if (args.size() >= 5) {
-            try {
-                duration = std::stod(args[4]);
-            } catch (...) {
-                std::cout << "Error: invalid duration: " << args[4] << std::endl;
-                return 1;
+            if (args.size() >= 4) {
+                try {
+                    startTime = std::stod(args[3]);
+                } catch (...) {
+                    std::cout << "Error: invalid start time: " << args[3] << std::endl;
+                    return 1;
+                }
             }
+
+            if (args.size() >= 5) {
+                try {
+                    duration = std::stod(args[4]);
+                } catch (...) {
+                    std::cout << "Error: invalid duration: " << args[4] << std::endl;
+                    return 1;
+                }
+            }
+        }
+        else {
+            std::cout << "Error: render command requires --path <input> --out <output> [--start <time>] [--dur <duration>]" << std::endl;
+            std::cout << "       or legacy format: <input> <output> [<start>] [<duration>]" << std::endl;
+            return 1;
         }
 
         if (!client.Render(inputFile, outputFile, startTime, duration)) {

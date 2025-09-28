@@ -329,8 +329,8 @@ public:
     }
 };
 
-void RunServer() {
-    std::string server_address("0.0.0.0:50051");
+void RunServer(int port = 50051) {
+    std::string server_address = "0.0.0.0:" + std::to_string(port);
     AudioEngineServiceImpl service;
 
     grpc::EnableDefaultHealthCheckService(true);
@@ -341,19 +341,61 @@ void RunServer() {
     builder.RegisterService(&service);
 
     std::unique_ptr<Server> server(builder.BuildAndStart());
-    std::cout << "[gRPC] Server listening on " << server_address << std::endl;
+    if (!server) {
+        std::cerr << "[gRPC] Failed to start server on " << server_address << std::endl;
+        return;
+    }
+
+    std::cout << "[gRPC] Server is listening on " << server_address << std::endl;
+    std::cout << "[gRPC] Listening" << std::endl;  // Required by smoke test script
 
     server->Wait();
 }
 
+void printUsage(const char* programName) {
+    std::cout << "Usage: " << programName << " [options]" << std::endl;
+    std::cout << std::endl;
+    std::cout << "Options:" << std::endl;
+    std::cout << "  --port <port>       Server port (default: 50051)" << std::endl;
+    std::cout << "  --help, -h          Show this help message" << std::endl;
+    std::cout << std::endl;
+}
+
 int main(int argc, char** argv) {
+    int port = 50051;
+
+    // Parse command line arguments
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--port" && i + 1 < argc) {
+            try {
+                port = std::stoi(argv[++i]);
+                if (port <= 0 || port > 65535) {
+                    std::cerr << "Error: invalid port number: " << port << std::endl;
+                    return 1;
+                }
+            } catch (...) {
+                std::cerr << "Error: invalid port argument: " << argv[i] << std::endl;
+                return 1;
+            }
+        } else if (arg == "--help" || arg == "-h") {
+            printUsage(argv[0]);
+            return 0;
+        } else {
+            std::cerr << "Error: unknown argument: " << arg << std::endl;
+            printUsage(argv[0]);
+            return 1;
+        }
+    }
+
     // Initialize JUCE
     juce::initialiseJuce_GUI();
 
     try {
-        RunServer();
+        RunServer(port);
     } catch (const std::exception& e) {
         std::cerr << "[gRPC] Server error: " << e.what() << std::endl;
+        juce::shutdownJuce_GUI();
         return 1;
     }
 

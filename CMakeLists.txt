@@ -156,6 +156,13 @@ if(ENABLE_GRPC)
             audio_engine_proto
     )
 
+    # Set output directory for server binary
+    set_target_properties(audio_engine_server PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+        RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/bin"
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/bin"
+    )
+
     # gRPC client CLI executable
     add_executable(grpc_client_cli
         src/grpc_client_cli.cpp
@@ -163,6 +170,13 @@ if(ENABLE_GRPC)
     target_link_libraries(grpc_client_cli
         PRIVATE
             audio_engine_proto
+    )
+
+    # Set output directory for client binary (put in tools to match expectation)
+    set_target_properties(grpc_client_cli PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tools"
+        RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/tools"
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/tools"
     )
 endif()
 
