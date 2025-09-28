@@ -61,8 +61,9 @@ if(ENABLE_GRPC)
         set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/third_party/vcpkg/scripts/buildsystems/vcpkg.cmake" CACHE STRING "")
     endif()
 
-    find_package(Protobuf REQUIRED)
-    find_package(gRPC REQUIRED)
+    # Use CONFIG mode so we get the imported CMake targets from vcpkg
+    find_package(Protobuf CONFIG REQUIRED)
+    find_package(gRPC CONFIG REQUIRED)
 
     # Proto generation
     set(PROTO_FILES
@@ -154,6 +155,10 @@ if(ENABLE_GRPC)
         PRIVATE
             JuceAudioService
             audio_engine_proto
+            gRPC::grpc++                # core C++ API
+            gRPC::grpc++_alts           # ALTS support
+            gRPC::grpc++_reflection     # <-- required for InitProtoReflectionServerBuilderPlugin()
+            protobuf::libprotobuf
     )
 
     # Set output directory for server binary
@@ -179,4 +184,3 @@ if(ENABLE_GRPC)
         RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/tools"
     )
 endif()
-

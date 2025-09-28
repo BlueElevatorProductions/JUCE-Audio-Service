@@ -16,6 +16,8 @@
 #include "JuceAudioService/AudioFileSource.h"
 #include "JuceAudioService/OfflineRenderer.h"
 
+#include <juce_core/juce_core.h>
+#include <juce_audio_formats/juce_audio_formats.h>
 #include <openssl/sha.h>
 
 using grpc::Server;
@@ -34,7 +36,10 @@ private:
 
     std::string calculateSHA256(const std::string& filePath) {
         std::ifstream file(filePath, std::ios::binary);
-        if (!file) return "";
+        if (!file.is_open()) {
+            std::cerr << "[gRPC] Failed to open file for SHA256: " << filePath << std::endl;
+            return "";
+        }
 
         unsigned char hash[SHA256_DIGEST_LENGTH];
         SHA256_CTX sha256;
@@ -46,6 +51,11 @@ private:
         }
         if (file.gcount() > 0) {
             SHA256_Update(&sha256, buffer, file.gcount());
+        }
+
+        if (file.bad()) {
+            std::cerr << "[gRPC] Error reading file for SHA256: " << filePath << std::endl;
+            return "";
         }
 
         SHA256_Final(hash, &sha256);
@@ -67,28 +77,38 @@ public:
 
         std::cout << "[gRPC] LoadFile request for: " << request->file_path() << std::endl;
 
-        const std::string& filePath = request->file_path();
+        const std::string& inputPath = request->file_path();
 
-        // Check if file exists
-        if (!fs::exists(filePath)) {
-            response->set_success(false);
-            response->set_message("File does not exist: " + filePath);
-            std::cout << "[gRPC] LoadFile failed: file does not exist" << std::endl;
-            return Status::OK;
+        // Handle absolute vs relative paths using JUCE
+        juce::File file(inputPath);
+        if (!file.isAbsolute()) {
+            file = juce::File::getCurrentWorkingDirectory().getChildFile(inputPath);
         }
 
-        // Create new audio source
-        currentAudioSource = std::make_unique<juceaudioservice::AudioFileSource>();
+        // Check if file exists
+        if (!file.existsAsFile()) {
+            return Status(StatusCode::NOT_FOUND,
+                         "File not found: " + file.getFullPathName().toStdString());
+        }
 
-        juce::File file(filePath);
+        // Validate audio format using JUCE AudioFormatManager
+        juce::AudioFormatManager formatManager;
+        formatManager.registerBasicFormats();
+
+        std::unique_ptr<juce::AudioFormatReader> reader(formatManager.createReaderFor(file));
+        if (!reader) {
+            return Status(StatusCode::INVALID_ARGUMENT,
+                         "Unsupported or unreadable audio file: " + file.getFullPathName().toStdString());
+        }
+
+        // Create new audio source and load the file
+        currentAudioSource = std::make_unique<juceaudioservice::AudioFileSource>();
         bool loaded = currentAudioSource->loadFile(file);
 
         if (!loaded) {
-            response->set_success(false);
-            response->set_message("Failed to load audio file: " + filePath);
             currentAudioSource.reset();
-            std::cout << "[gRPC] LoadFile failed: could not load audio file" << std::endl;
-            return Status::OK;
+            return Status(StatusCode::INTERNAL,
+                         "Failed to load audio file: " + file.getFullPathName().toStdString());
         }
 
         // Success - populate response with file info
@@ -96,7 +116,7 @@ public:
         response->set_message("File loaded successfully");
 
         auto* fileInfo = response->mutable_file_info();
-        fileInfo->set_path(filePath);
+        fileInfo->set_path(file.getFullPathName().toStdString());
         fileInfo->set_sample_rate(static_cast<int32_t>(currentAudioSource->getSampleRate()));
         fileInfo->set_num_channels(currentAudioSource->getNumChannels());
 
@@ -105,13 +125,9 @@ public:
             fileInfo->set_duration_seconds(static_cast<double>(currentAudioSource->getTotalLength()) / sampleRate);
         }
 
-        try {
-            fileInfo->set_file_size_bytes(static_cast<int64_t>(fs::file_size(filePath)));
-        } catch (...) {
-            fileInfo->set_file_size_bytes(0);
-        }
+        fileInfo->set_file_size_bytes(file.getSize());
 
-        std::cout << "[gRPC] LoadFile successful: " << filePath << " ("
+        std::cout << "[gRPC] LoadFile successful: " << file.getFullPathName().toStdString() << " ("
                   << fileInfo->duration_seconds() << "s, "
                   << fileInfo->sample_rate() << "Hz, "
                   << fileInfo->num_channels() << " channels)" << std::endl;
@@ -389,16 +405,13 @@ int main(int argc, char** argv) {
     }
 
     // Initialize JUCE
-    juce::initialiseJuce_GUI();
 
     try {
         RunServer(port);
     } catch (const std::exception& e) {
         std::cerr << "[gRPC] Server error: " << e.what() << std::endl;
-        juce::shutdownJuce_GUI();
         return 1;
     }
 
-    juce::shutdownJuce_GUI();
     return 0;
 }

@@ -63,6 +63,7 @@ if(ENABLE_GRPC)
         PRIVATE
             JUCE_WEB_BROWSER=0
             JUCE_USE_CURL=0
+            PROJECT_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
     )
 
     add_test(NAME ${GRPC_TEST_TARGET} COMMAND ${GRPC_TEST_TARGET})

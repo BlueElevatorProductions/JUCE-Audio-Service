@@ -17,6 +17,26 @@
 #include "JuceAudioService/AudioFileSource.h"
 #include "JuceAudioService/OfflineRenderer.h"
 
+#ifndef PROJECT_SOURCE_DIR
+#define PROJECT_SOURCE_DIR "."
+#endif
+
+// Helper function to get absolute path to fixture files
+static std::string getFixture(const char* relativePath) {
+    juce::File root(PROJECT_SOURCE_DIR);
+    juce::File fixturePath = root.getChildFile("fixtures").getChildFile(relativePath);
+    return fixturePath.getFullPathName().toStdString();
+}
+
+// Helper function to create absolute path in output directory
+static std::string getOutputPath(const char* relativePath) {
+    juce::File root(PROJECT_SOURCE_DIR);
+    juce::File outputPath = root.getChildFile("out").getChildFile(relativePath);
+    // Ensure parent directory exists
+    outputPath.getParentDirectory().createDirectory();
+    return outputPath.getFullPathName().toStdString();
+}
+
 using grpc::Channel;
 using grpc::ClientContext;
 using grpc::ClientReader;
@@ -172,7 +192,7 @@ public:
 };
 
 std::string createTestAudioFile() {
-    const std::string testFile = "/tmp/test_audio.wav";
+    const std::string testFile = getOutputPath("test_audio.wav");
 
     // Create a simple WAV file
     std::ofstream file(testFile, std::ios::binary);
@@ -264,7 +284,7 @@ bool testLoadFileWithClient() {
     bool result = client.LoadFile(testFile);
 
     // Cleanup
-    fs::remove(testFile);
+    juce::File(testFile).deleteFile();
     server->Shutdown();
 
     if (result) {
@@ -292,7 +312,7 @@ bool testRenderWithClient() {
 
     // Create test file
     std::string testInputFile = createTestAudioFile();
-    std::string testOutputFile = "/tmp/test_output.wav";
+    std::string testOutputFile = getOutputPath("test_output.wav");
 
     // Create client and test
     auto channel = grpc::CreateChannel(serverAddress, grpc::InsecureChannelCredentials());
@@ -311,8 +331,8 @@ bool testRenderWithClient() {
     bool renderResult = client.Render(testInputFile, testOutputFile);
 
     // Cleanup
-    fs::remove(testInputFile);
-    fs::remove(testOutputFile);
+    juce::File(testInputFile).deleteFile();
+    juce::File(testOutputFile).deleteFile();
     server->Shutdown();
 
     if (renderResult) {
@@ -326,7 +346,6 @@ bool testRenderWithClient() {
 
 int main(int argc, char** argv) {
     // Initialize JUCE
-    juce::initialiseJuce_GUI();
 
     std::cout << "Running gRPC smoke tests..." << std::endl;
 
@@ -353,7 +372,6 @@ int main(int argc, char** argv) {
         allTestsPassed = false;
     }
 
-    juce::shutdownJuce_GUI();
 
     if (allTestsPassed) {
         std::cout << "All gRPC smoke tests passed!" << std::endl;
