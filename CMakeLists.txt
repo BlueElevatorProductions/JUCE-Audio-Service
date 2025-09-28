@@ -13,6 +13,9 @@ set(JUCE_ENABLE_MODULE_SOURCE_GROUPS ON CACHE BOOL "" FORCE)
 set(JUCE_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(JUCE_BUILD_EXTRAS OFF CACHE BOOL "" FORCE)
 
+# Disable problematic modules for better macOS compatibility
+set(JUCE_MODULES_ONLY ON CACHE BOOL "" FORCE)
+
 # Use local JUCE from third_party/JUCE
 if(USE_LOCAL_JUCE)
     set(_juce_source "${CMAKE_SOURCE_DIR}/third_party/JUCE")
