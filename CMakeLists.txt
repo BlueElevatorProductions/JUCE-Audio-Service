@@ -7,34 +7,39 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(JUCE_AUDIO_SERVICE_ENABLE_TESTS "Build the JuceAudioService tests" ${PROJECT_IS_TOP_LEVEL})
+option(USE_LOCAL_JUCE "Use JUCE from third_party/JUCE" ON)
 
 set(JUCE_ENABLE_MODULE_SOURCE_GROUPS ON CACHE BOOL "" FORCE)
 set(JUCE_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(JUCE_BUILD_EXTRAS OFF CACHE BOOL "" FORCE)
 
-set(_juce_source "")
-if(DEFINED JUCE_SOURCE_DIR)
-    set(_juce_source "${JUCE_SOURCE_DIR}")
-elseif(DEFINED ENV{JUCE_SOURCE_DIR})
-    set(_juce_source "$ENV{JUCE_SOURCE_DIR}")
-endif()
-
-if(_juce_source)
-    if(NOT IS_ABSOLUTE "${_juce_source}")
-        get_filename_component(_juce_source "${_juce_source}" REALPATH BASE_DIR "${CMAKE_SOURCE_DIR}")
+# Use local JUCE from third_party/JUCE
+if(USE_LOCAL_JUCE)
+    set(_juce_source "${CMAKE_SOURCE_DIR}/third_party/JUCE")
+    if(EXISTS "${_juce_source}/CMakeLists.txt")
+        message(STATUS "Using local JUCE from ${_juce_source}")
+        add_subdirectory("${_juce_source}" juce EXCLUDE_FROM_ALL)
+    else()
+        message(FATAL_ERROR "JUCE not found at ${_juce_source}. Run scripts/get_deps.sh or initialize submodules with: git submodule update --init --recursive")
     endif()
-    message(STATUS "Using local JUCE from ${_juce_source}")
-    add_subdirectory("${_juce_source}" juce)
 else()
-    include(FetchContent)
+    # Fallback to user-provided JUCE_SOURCE_DIR
+    set(_juce_source "")
+    if(DEFINED JUCE_SOURCE_DIR)
+        set(_juce_source "${JUCE_SOURCE_DIR}")
+    elseif(DEFINED ENV{JUCE_SOURCE_DIR})
+        set(_juce_source "$ENV{JUCE_SOURCE_DIR}")
+    endif()
 
-    FetchContent_Declare(
-        juce
-        GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
-        GIT_TAG 7.0.9
-    )
-
-    FetchContent_MakeAvailable(juce)
+    if(_juce_source)
+        if(NOT IS_ABSOLUTE "${_juce_source}")
+            get_filename_component(_juce_source "${_juce_source}" REALPATH BASE_DIR "${CMAKE_SOURCE_DIR}")
+        endif()
+        message(STATUS "Using external JUCE from ${_juce_source}")
+        add_subdirectory("${_juce_source}" juce)
+    else()
+        message(FATAL_ERROR "JUCE not found. Either enable USE_LOCAL_JUCE or set JUCE_SOURCE_DIR")
+    endif()
 endif()
 
 add_library(JuceAudioService
