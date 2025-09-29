@@ -161,11 +161,11 @@ public:
         if (!currentAudioSource || !currentAudioSource->isLoaded()) {
             const std::string& inputFile = request->input_file();
             if (inputFile.empty()) {
-                audio_engine::RenderResponse response;
-                auto* error = response.mutable_error();
-                error->set_error_code("NO_FILE_LOADED");
-                error->set_error_message("No audio file is currently loaded and no input file provided.");
-                writer->Write(response);
+            audio_engine::RenderResponse response;
+            auto* error = response.mutable_error();
+            error->set_error_code("NO_FILE_LOADED");
+            error->set_error_message("No audio file is currently loaded and no input file provided.");
+            writer->Write(response);
                 std::cout << "[gRPC] Render failed: no file loaded and no input file provided" << std::endl;
                 return Status::OK;
             }
@@ -373,8 +373,14 @@ public:
         return Status(StatusCode::UNIMPLEMENTED, "UpdateEdl is not implemented");
     }
 
+    Status RenderEdlWindow(ServerContext* context, const audio_engine::RenderEdlWindowRequest* request,
+                           ServerWriter<audio_engine::EngineEvent>* writer) override {
+        std::cout << "[gRPC] RenderEdlWindow called (UNIMPLEMENTED)" << std::endl;
+        return Status(StatusCode::UNIMPLEMENTED, "RenderEdlWindow is not implemented");
+    }
+
     Status Subscribe(ServerContext* context, const audio_engine::SubscribeRequest* request,
-                    ServerWriter<audio_engine::SubscribeResponse>* writer) override {
+                    ServerWriter<audio_engine::EngineEvent>* writer) override {
         std::cout << "[gRPC] Subscribe called (UNIMPLEMENTED)" << std::endl;
         return Status(StatusCode::UNIMPLEMENTED, "Subscribe is not implemented");
     }

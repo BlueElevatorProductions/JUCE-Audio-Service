@@ -2,100 +2,192 @@ syntax = "proto3";
 
 package audio_engine;
 
-// Service definition for audio engine operations
-service AudioEngine {
-    // Load an audio file for processing
-    rpc LoadFile(LoadFileRequest) returns (LoadFileResponse);
-
-    // Render audio with streaming progress updates
-    rpc Render(RenderRequest) returns (stream RenderResponse);
-
-    // Update EDL (Edit Decision List) - placeholder for future implementation
-    rpc UpdateEdl(UpdateEdlRequest) returns (UpdateEdlResponse);
-
-    // Subscribe to events - placeholder for future implementation
-    rpc Subscribe(SubscribeRequest) returns (stream SubscribeResponse);
+message TimeRange {
+  int64 start_samples = 1;
+  int64 duration_samples = 2;
 }
 
-// LoadFile messages
+message Fade {
+  enum Shape {
+    LINEAR = 0;
+    EQUAL_POWER = 1;
+  }
+
+  int64 duration_samples = 1;
+  Shape shape = 2;
+}
+
+message AudioRef {
+  string id = 1;
+  string path = 2;
+  int32 sample_rate = 3;
+  int32 channels = 4;
+}
+
+message Clip {
+  string id = 1;
+  string media_id = 2;
+  int64 start_in_media = 3;
+  int64 start_in_timeline = 4;
+  int64 duration = 5;
+  float gain_db = 6;
+  Fade fade_in = 7;
+  Fade fade_out = 8;
+  bool muted = 9;
+}
+
+message Track {
+  string id = 1;
+  float gain_db = 2;
+  bool muted = 3;
+  repeated Clip clips = 4;
+}
+
+message Edl {
+  string id = 1;
+  string revision = 2;
+  int32 sample_rate = 3;
+  repeated AudioRef media = 4;
+  repeated Track tracks = 5;
+}
+
 message LoadFileRequest {
-    string file_path = 1;
-}
-
-message LoadFileResponse {
-    bool success = 1;
-    string message = 2;
-    optional FileInfo file_info = 3;
+  string file_path = 1;
 }
 
 message FileInfo {
-    string path = 1;
-    double duration_seconds = 2;
-    int32 sample_rate = 3;
-    int32 num_channels = 4;
-    int64 file_size_bytes = 5;
+  string path = 1;
+  double duration_seconds = 2;
+  int32 sample_rate = 3;
+  int32 num_channels = 4;
+  int64 file_size_bytes = 5;
 }
 
-// Render messages
+message LoadFileResponse {
+  bool success = 1;
+  string message = 2;
+  optional FileInfo file_info = 3;
+}
+
 message RenderRequest {
-    string input_file = 1;
-    string output_file = 2;
-    optional double start_time = 3;  // Start time in seconds
-    optional double duration = 4;    // Duration in seconds
-    optional RenderSettings settings = 5;
+  string input_file = 1;
+  string output_file = 2;
+  optional double start_time = 3;
+  optional double duration = 4;
+  optional RenderSettings settings = 5;
 }
 
 message RenderSettings {
-    int32 sample_rate = 1;
-    int32 bit_depth = 2;
-    string format = 3;  // "wav", "aiff", etc.
+  int32 sample_rate = 1;
+  int32 bit_depth = 2;
+  string format = 3;
+}
+
+message RenderProgressLegacy {
+  double progress_percentage = 1;
+  string status_message = 2;
+  optional double elapsed_seconds = 3;
+  optional double estimated_remaining_seconds = 4;
+}
+
+message RenderCompleteLegacy {
+  string output_file_path = 1;
+  string sha256_hash = 2;
+  double total_duration_seconds = 3;
+  int64 output_file_size_bytes = 4;
+}
+
+message RenderErrorLegacy {
+  string error_code = 1;
+  string error_message = 2;
+  optional string stack_trace = 3;
 }
 
 message RenderResponse {
-    oneof response_type {
-        RenderProgress progress = 1;
-        RenderComplete complete = 2;
-        RenderError error = 3;
-    }
+  oneof response_type {
+    RenderProgressLegacy progress = 1;
+    RenderCompleteLegacy complete = 2;
+    RenderErrorLegacy error = 3;
+  }
 }
 
-message RenderProgress {
-    double progress_percentage = 1;  // 0.0 to 100.0
-    string status_message = 2;
-    optional double elapsed_seconds = 3;
-    optional double estimated_remaining_seconds = 4;
-}
-
-message RenderComplete {
-    string output_file_path = 1;
-    string sha256_hash = 2;
-    double total_duration_seconds = 3;
-    int64 output_file_size_bytes = 4;
-}
-
-message RenderError {
-    string error_code = 1;
-    string error_message = 2;
-    optional string stack_trace = 3;
-}
-
-// UpdateEdl messages (placeholder - returns UNIMPLEMENTED)
 message UpdateEdlRequest {
-    string edl_data = 1;
+  Edl edl = 1;
+  bool replace = 2;
 }
 
 message UpdateEdlResponse {
-    bool success = 1;
-    string message = 2;
+  string edl_id = 1;
+  string revision = 2;
+  int32 track_count = 3;
+  int32 clip_count = 4;
 }
 
-// Subscribe messages (placeholder - returns UNIMPLEMENTED)
 message SubscribeRequest {
-    repeated string event_types = 1;
+  string session = 1;
 }
 
-message SubscribeResponse {
-    string event_type = 1;
-    string event_data = 2;
-    int64 timestamp = 3;
+message Heartbeat {
+  int64 monotonic_ms = 1;
+}
+
+message BackendStatus {
+  string status = 1;
+}
+
+message FileLoaded {
+  string path = 1;
+  double duration_sec = 2;
+  int32 sr = 3;
+  int32 ch = 4;
+}
+
+message EdlApplied {
+  string edl_id = 1;
+  string revision = 2;
+  int32 track_count = 3;
+  int32 clip_count = 4;
+}
+
+message EdlError {
+  string edl_id = 1;
+  string reason = 2;
+}
+
+message RenderEdlWindowRequest {
+  string edl_id = 1;
+  TimeRange range = 2;
+  string out_path = 3;
+  int32 bit_depth = 4;
+}
+
+message RenderProgress {
+  double fraction = 1;
+  string eta = 2;
+}
+
+message RenderComplete {
+  string out_path = 1;
+  double duration_sec = 2;
+  string sha256 = 3;
+}
+
+message EngineEvent {
+  oneof evt {
+    Heartbeat heartbeat = 1;
+    BackendStatus backend = 2;
+    FileLoaded file_loaded = 3;
+    EdlApplied edl_applied = 4;
+    EdlError edl_error = 5;
+    RenderProgress progress = 6;
+    RenderComplete complete = 7;
+  }
+}
+
+service AudioEngine {
+  rpc LoadFile(LoadFileRequest) returns (LoadFileResponse);
+  rpc Render(RenderRequest) returns (stream RenderResponse);
+  rpc UpdateEdl(UpdateEdlRequest) returns (UpdateEdlResponse);
+  rpc RenderEdlWindow(RenderEdlWindowRequest) returns (stream EngineEvent);
+  rpc Subscribe(SubscribeRequest) returns (stream EngineEvent);
 }
