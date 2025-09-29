@@ -24,7 +24,7 @@ bool EdlJson::toJson(const audio_engine::Edl& edl, std::string& jsonString, std:
     google::protobuf::util::JsonPrintOptions options;
     options.add_whitespace = true;
     options.preserve_proto_field_names = true;
-    options.always_print_primitive_fields = true;
+    // Note: always_print_primitive_fields removed in newer protobuf versions
 
     auto status = google::protobuf::util::MessageToJsonString(edl, &jsonString, options);
     if (!status.ok()) {
@@ -39,7 +39,7 @@ bool EdlJson::eventToJson(const audio_engine::EngineEvent& event, std::string& j
     google::protobuf::util::JsonPrintOptions options;
     options.add_whitespace = false; // Compact format for streaming
     options.preserve_proto_field_names = true;
-    options.always_print_primitive_fields = false; // Skip default values for compactness
+    // Note: always_print_primitive_fields removed in newer protobuf versions
 
     auto status = google::protobuf::util::MessageToJsonString(event, &jsonString, options);
     if (!status.ok()) {

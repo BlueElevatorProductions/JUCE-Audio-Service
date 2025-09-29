@@ -1,5 +1,5 @@
 #include "EdlStore.h"
-#include <openssl/sha.h>
+#include <openssl/evp.h>
 #include <sstream>
 #include <iomanip>
 #include <google/protobuf/util/json_util.h>
@@ -228,21 +228,31 @@ bool EdlStore::validateFade(const audio_engine::Fade& fade, const std::string& f
 std::string EdlStore::calculateRevision(const audio_engine::Edl& edl) {
     // Convert to JSON for stable hashing
     std::string jsonString;
-    google::protobuf::util::MessageToJsonString(edl, &jsonString);
+    auto status = google::protobuf::util::MessageToJsonString(edl, &jsonString);
+    (void)status; // Suppress unused variable warning
 
     std::string hash = calculateSHA256(jsonString);
     return hash.substr(0, 12); // First 12 characters
 }
 
 std::string EdlStore::calculateSHA256(const std::string& data) {
-    unsigned char hash[SHA256_DIGEST_LENGTH];
-    SHA256_CTX sha256;
-    SHA256_Init(&sha256);
-    SHA256_Update(&sha256, data.c_str(), data.size());
-    SHA256_Final(hash, &sha256);
+    unsigned char hash[32]; // SHA256 produces 32 bytes
+    unsigned int hashLen = 0;
+
+    EVP_MD_CTX* ctx = EVP_MD_CTX_new();
+    if (!ctx) return "";
+
+    if (EVP_DigestInit_ex(ctx, EVP_sha256(), nullptr) != 1 ||
+        EVP_DigestUpdate(ctx, data.c_str(), data.size()) != 1 ||
+        EVP_DigestFinal_ex(ctx, hash, &hashLen) != 1) {
+        EVP_MD_CTX_free(ctx);
+        return "";
+    }
+
+    EVP_MD_CTX_free(ctx);
 
     std::stringstream ss;
-    for (int i = 0; i < SHA256_DIGEST_LENGTH; ++i) {
+    for (unsigned int i = 0; i < hashLen; ++i) {
         ss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(hash[i]);
     }
     return ss.str();

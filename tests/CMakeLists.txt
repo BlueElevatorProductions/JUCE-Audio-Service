@@ -73,5 +73,32 @@ if(ENABLE_GRPC)
 
     add_test(NAME ${GRPC_TEST_TARGET} COMMAND ${GRPC_TEST_TARGET})
     set_tests_properties(${GRPC_TEST_TARGET} PROPERTIES LABELS "grpc")
+
+    # EDL Integration Tests
+    set(EDL_TEST_TARGET GrpcEdlIntegrationTest)
+
+    add_executable(${EDL_TEST_TARGET}
+        GrpcEdlIntegrationTest.cpp
+    )
+
+    target_link_libraries(${EDL_TEST_TARGET}
+        PRIVATE
+            JuceAudioService::JuceAudioService
+            audio_engine_proto
+            protobuf::libprotobuf
+            juce::juce_core
+    )
+
+    target_compile_features(${EDL_TEST_TARGET} PRIVATE cxx_std_20)
+
+    target_compile_definitions(${EDL_TEST_TARGET}
+        PRIVATE
+            JUCE_WEB_BROWSER=0
+            JUCE_USE_CURL=0
+            PROJECT_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    )
+
+    add_test(NAME ${EDL_TEST_TARGET} COMMAND ${EDL_TEST_TARGET})
+    set_tests_properties(${EDL_TEST_TARGET} PROPERTIES LABELS "grpc")
 endif()
 

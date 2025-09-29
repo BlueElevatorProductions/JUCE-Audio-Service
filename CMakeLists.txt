@@ -109,18 +109,31 @@ if(ENABLE_GRPC)
     )
 endif()
 
-add_library(JuceAudioService
+# --- JuceAudioService sources ---
+set(JUCE_AUDIO_SERVICE_SOURCES
     src/AudioService.cpp
     src/VoiceGenerator.cpp
     src/AudioFileSource.cpp
     src/OfflineRenderer.cpp
 )
 
+# Add EDL sources when gRPC is enabled
+if(ENABLE_GRPC)
+    list(APPEND JUCE_AUDIO_SERVICE_SOURCES
+        src/edl/EdlStore.cpp
+        src/edl/EdlCompiler.cpp
+        src/edl/EdlRenderer.cpp
+        src/util/EdlJson.cpp
+    )
+endif()
+
+add_library(JuceAudioService ${JUCE_AUDIO_SERVICE_SOURCES})
 add_library(JuceAudioService::JuceAudioService ALIAS JuceAudioService)
 
 target_include_directories(JuceAudioService
     PUBLIC
         ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/src
 )
 
 target_link_libraries(JuceAudioService
@@ -129,6 +142,19 @@ target_link_libraries(JuceAudioService
         juce::juce_audio_basics
         juce::juce_audio_formats
 )
+
+# Add protobuf dependency when gRPC is enabled (for EdlJson)
+if(ENABLE_GRPC)
+    target_link_libraries(JuceAudioService
+        PUBLIC
+            protobuf::libprotobuf
+            audio_engine_proto
+    )
+    target_include_directories(JuceAudioService
+        PUBLIC
+            ${PROTO_GENERATED_DIR}
+    )
+endif()
 
 target_compile_features(JuceAudioService PUBLIC cxx_std_20)
 
@@ -150,10 +176,6 @@ if(ENABLE_GRPC)
     # gRPC server executable
     add_executable(audio_engine_server
         src/grpc_server.cpp
-        src/edl/EdlStore.cpp
-        src/edl/EdlCompiler.cpp
-        src/edl/EdlRenderer.cpp
-        src/util/EdlJson.cpp
     )
     target_link_libraries(audio_engine_server
         PRIVATE
@@ -163,11 +185,6 @@ if(ENABLE_GRPC)
             gRPC::grpc++_alts           # ALTS support
             gRPC::grpc++_reflection     # <-- required for InitProtoReflectionServerBuilderPlugin()
             protobuf::libprotobuf
-    )
-
-    target_include_directories(audio_engine_server
-        PRIVATE
-            ${CMAKE_SOURCE_DIR}/src
     )
 
     # Set output directory for server binary
@@ -184,6 +201,8 @@ if(ENABLE_GRPC)
     target_link_libraries(grpc_client_cli
         PRIVATE
             audio_engine_proto
+            JuceAudioService::JuceAudioService
+            protobuf::libprotobuf
     )
 
     # Set output directory for client binary (put in tools to match expectation)

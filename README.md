@@ -49,6 +49,10 @@ git submodule update --init --recursive
 
 cd build && ctest -L grpc
 
+	6.	Run specific EDL integration tests
+
+cd build && ctest -R GrpcEdlIntegrationTest -V
+
 **Note:** This project is Apple Silicon only. The first gRPC build will take longer as it downloads and caches dependencies via vcpkg. Subsequent builds use the local binary cache.
 
 
@@ -87,6 +91,24 @@ Server listens on `0.0.0.0:50051` by default.
 ./build/tools/grpc_client_cli render /path/to/input.wav /path/to/output.wav 1.0 5.0
 ```
 
+**EDL Commands:**
+```bash
+# Update EDL from JSON file
+./build/tools/grpc_client_cli edl-update --edl fixtures/test_edl.json
+
+# Update EDL with replace option
+./build/tools/grpc_client_cli edl-update --edl fixtures/test_edl.json --replace
+
+# Render EDL window (start at 0s, duration 5s, 24-bit output)
+./build/tools/grpc_client_cli edl-render --edl-id abc123def --start 0 --dur 5 --out output.wav --bit-depth 24
+
+# Render EDL window (16-bit default)
+./build/tools/grpc_client_cli edl-render --edl-id abc123def --start 1.5 --dur 2.5 --out segment.wav
+
+# Subscribe to EDL events (outputs NDJSON stream)
+./build/tools/grpc_client_cli subscribe --edl-id abc123def
+```
+
 **Run automated smoke test:**
 ```bash
 # Quick end-to-end test
@@ -99,8 +121,9 @@ PORT=50052 CFG=Debug ./scripts/smoke_test.sh
 **Implemented gRPC methods:**
 - `LoadFile`: Load and validate audio files
 - `Render`: Offline render with streaming progress updates
-- `UpdateEdl`: Placeholder (returns UNIMPLEMENTED)
-- `Subscribe`: Placeholder (returns UNIMPLEMENTED)
+- `UpdateEdl`: Validate and store EDL with JSON/protobuf conversion
+- `RenderEdlWindow`: Offline render EDL segments with streaming progress
+- `Subscribe`: Real-time event streaming for EDL operations (NDJSON output)
 
 ⸻
 

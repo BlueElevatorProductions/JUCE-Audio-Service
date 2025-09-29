@@ -9,6 +9,7 @@
 
 #include <grpcpp/grpcpp.h>
 #include "audio_engine.grpc.pb.h"
+#include "util/EdlJson.h"
 
 using grpc::Channel;
 using grpc::ClientContext;
@@ -128,6 +129,132 @@ public:
             std::cout << "Server ping failed: " << status.error_message() << std::endl;
         }
     }
+
+    bool UpdateEdl(const std::string& edlPath, bool replace = false) {
+        // Read JSON file
+        std::string jsonString, error;
+        if (!juceaudioservice::EdlJson::readJsonFromFile(edlPath, jsonString, error)) {
+            std::cout << "Failed to read EDL file: " << error << std::endl;
+            return false;
+        }
+
+        // Parse JSON to EDL
+        audio_engine::Edl edl;
+        if (!juceaudioservice::EdlJson::parseFromJson(jsonString, edl, error)) {
+            std::cout << "Failed to parse EDL JSON: " << error << std::endl;
+            return false;
+        }
+
+        // Call UpdateEdl RPC
+        audio_engine::UpdateEdlRequest request;
+        request.mutable_edl()->CopyFrom(edl);
+        request.set_replace(replace);
+
+        audio_engine::UpdateEdlResponse response;
+        ClientContext context;
+
+        Status status = stub_->UpdateEdl(&context, request, &response);
+
+        if (!status.ok()) {
+            std::cout << "UpdateEdl RPC failed: " << status.error_message() << std::endl;
+            return false;
+        }
+
+        std::cout << "EDL updated successfully:" << std::endl;
+        std::cout << "  EDL ID: " << response.edl_id() << std::endl;
+        std::cout << "  Revision: " << response.revision() << std::endl;
+        std::cout << "  Track Count: " << response.track_count() << std::endl;
+        std::cout << "  Clip Count: " << response.clip_count() << std::endl;
+
+        return true;
+    }
+
+    bool RenderEdlWindow(const std::string& edlId, double startSec, double durSec,
+                        const std::string& outputPath, int bitDepth = 16) {
+        // Convert seconds to samples (assume 48kHz)
+        const int sampleRate = 48000;
+        int64_t startSamples = static_cast<int64_t>(startSec * sampleRate);
+        int64_t durationSamples = static_cast<int64_t>(durSec * sampleRate);
+
+        audio_engine::RenderEdlWindowRequest request;
+        request.set_edl_id(edlId);
+        request.mutable_range()->set_start_samples(startSamples);
+        request.mutable_range()->set_duration_samples(durationSamples);
+        request.set_out_path(outputPath);
+        request.set_bit_depth(bitDepth);
+
+        ClientContext context;
+        std::unique_ptr<ClientReader<audio_engine::EngineEvent>> reader(
+            stub_->RenderEdlWindow(&context, request));
+
+        audio_engine::EngineEvent event;
+        bool success = false;
+        std::string finalChecksum;
+
+        while (reader->Read(&event)) {
+            if (event.has_progress()) {
+                const auto& progress = event.progress();
+                std::cout << "\rProgress: " << std::fixed << std::setprecision(1)
+                         << (progress.fraction() * 100.0) << "%";
+                if (!progress.eta().empty()) {
+                    std::cout << " (ETA: " << progress.eta() << ")";
+                }
+                std::cout.flush();
+            } else if (event.has_complete()) {
+                const auto& complete = event.complete();
+                std::cout << std::endl << "Render completed!" << std::endl;
+                std::cout << "  Output file: " << complete.out_path() << std::endl;
+                std::cout << "  Duration: " << complete.duration_sec() << " seconds" << std::endl;
+                std::cout << "  SHA256: " << complete.sha256() << std::endl;
+                finalChecksum = complete.sha256();
+                success = true;
+            } else if (event.has_edl_error()) {
+                const auto& error = event.edl_error();
+                std::cout << std::endl << "EDL Error: " << error.reason() << std::endl;
+                return false;
+            }
+        }
+
+        Status status = reader->Finish();
+        if (!status.ok()) {
+            std::cout << std::endl << "RenderEdlWindow RPC failed: " << status.error_message() << std::endl;
+            return false;
+        }
+
+        return success;
+    }
+
+    bool Subscribe(const std::string& edlId) {
+        audio_engine::SubscribeRequest request;
+        request.set_session(edlId);
+
+        ClientContext context;
+        std::unique_ptr<ClientReader<audio_engine::EngineEvent>> reader(
+            stub_->Subscribe(&context, request));
+
+        audio_engine::EngineEvent event;
+        std::string eventJson, error;
+
+        std::cout << "Subscribing to events for EDL: " << edlId << std::endl;
+        std::cout << "Press Ctrl+C to exit..." << std::endl;
+
+        while (reader->Read(&event)) {
+            // Convert event to NDJSON (one JSON object per line)
+            if (juceaudioservice::EdlJson::eventToJson(event, eventJson, error)) {
+                std::cout << eventJson << std::endl;
+            } else {
+                std::cerr << "Failed to convert event to JSON: " << error << std::endl;
+            }
+        }
+
+        Status status = reader->Finish();
+        if (!status.ok()) {
+            std::cout << "Subscribe RPC ended: " << status.error_message() << std::endl;
+            return false;
+        }
+
+        return true;
+    }
 };
 
 void printUsage(const char* programName) {
@@ -143,6 +270,11 @@ void printUsage(const char* programName) {
     std::cout << "  render --path <input> --out <output>        Render full file" << std::endl;
     std::cout << "  render --path <input> --out <output> --start <time> --dur <duration>  Render window" << std::endl;
     std::cout << std::endl;
+    std::cout << "EDL Commands:" << std::endl;
+    std::cout << "  edl-update --edl <path.json> [--replace]    Update EDL from JSON file" << std::endl;
+    std::cout << "  edl-render --edl-id <id> --start <sec> --dur <sec> --out <path> [--bit-depth 16|24|32]  Render EDL window" << std::endl;
+    std::cout << "  subscribe --edl-id <id>                     Subscribe to EDL events (NDJSON)" << std::endl;
+    std::cout << std::endl;
     std::cout << "Legacy format (still supported):" << std::endl;
     std::cout << "  load <file>" << std::endl;
     std::cout << "  render <input> <output> [<start>] [<duration>]" << std::endl;
@@ -152,6 +284,9 @@ void printUsage(const char* programName) {
     std::cout << "  " << programName << " load --path input.wav" << std::endl;
     std::cout << "  " << programName << " render --path input.wav --out output.wav" << std::endl;
     std::cout << "  " << programName << " render --path input.wav --out output.wav --start 1.0 --dur 5.0" << std::endl;
+    std::cout << "  " << programName << " edl-update --edl fixtures/test_edl.json" << std::endl;
+    std::cout << "  " << programName << " edl-render --edl-id abc123 --start 0 --dur 5 --out output.wav --bit-depth 24" << std::endl;
+    std::cout << "  " << programName << " subscribe --edl-id abc123" << std::endl;
 }
 
 // Helper function to find named argument value
@@ -294,6 +429,66 @@ int main(int argc, char** argv) {
         }
 
         if (!client.Render(inputFile, outputFile, startTime, duration)) {
+            return 1;
+        }
+    } else if (command == "edl-update") {
+        std::string edlPath = getNamedArg(args, "--edl");
+        bool replace = hasNamedArg(args, "--replace");
+
+        if (edlPath.empty()) {
+            std::cout << "Error: edl-update command requires --edl <path.json>" << std::endl;
+            return 1;
+        }
+
+        if (!std::filesystem::exists(edlPath)) {
+            std::cout << "Error: EDL file does not exist: " << edlPath << std::endl;
+            return 1;
+        }
+
+        if (!client.UpdateEdl(edlPath, replace)) {
+            return 1;
+        }
+    } else if (command == "edl-render") {
+        std::string edlId = getNamedArg(args, "--edl-id");
+        std::string startStr = getNamedArg(args, "--start");
+        std::string durStr = getNamedArg(args, "--dur");
+        std::string outputPath = getNamedArg(args, "--out");
+        std::string bitDepthStr = getNamedArg(args, "--bit-depth", "16");
+
+        if (edlId.empty() || startStr.empty() || durStr.empty() || outputPath.empty()) {
+            std::cout << "Error: edl-render command requires --edl-id <id> --start <sec> --dur <sec> --out <path>" << std::endl;
+            return 1;
+        }
+
+        double startSec, durSec;
+        int bitDepth;
+
+        try {
+            startSec = std::stod(startStr);
+            durSec = std::stod(durStr);
+            bitDepth = std::stoi(bitDepthStr);
+        } catch (...) {
+            std::cout << "Error: invalid numeric parameter" << std::endl;
+            return 1;
+        }
+
+        if (bitDepth != 16 && bitDepth != 24 && bitDepth != 32) {
+            std::cout << "Error: bit depth must be 16, 24, or 32" << std::endl;
+            return 1;
+        }
+
+        if (!client.RenderEdlWindow(edlId, startSec, durSec, outputPath, bitDepth)) {
+            return 1;
+        }
+    } else if (command == "subscribe") {
+        std::string edlId = getNamedArg(args, "--edl-id");
+
+        if (edlId.empty()) {
+            std::cout << "Error: subscribe command requires --edl-id <id>" << std::endl;
+            return 1;
+        }
+
+        if (!client.Subscribe(edlId)) {
             return 1;
         }
     } else {

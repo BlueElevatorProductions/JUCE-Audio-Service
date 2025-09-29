@@ -14,6 +14,7 @@ cmake_args=(
   -S .
   -B build
   -DCMAKE_BUILD_TYPE="$cfg"
+  -DCMAKE_OSX_ARCHITECTURES="$CMAKE_OSX_ARCHITECTURES"
 )
 
 # If caller passed -DENABLE_GRPC=ON anywhere, we provide the toolchain

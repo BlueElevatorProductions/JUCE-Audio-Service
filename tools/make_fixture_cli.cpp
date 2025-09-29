@@ -93,12 +93,27 @@ int main(int argc, char* argv[])
         juceaudioservice::AudioService audioService;
         audioService.initialise();
 
-        juce::File outputFile(options.outputFile);
-        bool success = audioService.writeAudioFile(buffer, outputFile, sampleRate, bitDepth);
+        // Resolve to absolute path safely
+        juce::File outFile(options.outputFile);
+        if (!juce::File::isAbsolutePath(options.outputFile))
+            outFile = juce::File::getCurrentWorkingDirectory().getChildFile(options.outputFile);
+
+        // Normalize extension
+        if (!outFile.hasFileExtension("wav"))
+            outFile = outFile.withFileExtension("wav");
+
+        // Ensure parent directory exists
+        auto parent = outFile.getParentDirectory();
+        if (!parent.exists())
+            parent.createDirectory();
+
+        std::cout << "[Generate] Writing to: " << outFile.getFullPathName() << std::endl;
+
+        bool success = audioService.writeAudioFile(buffer, outFile, sampleRate, bitDepth);
 
         if (success)
         {
-            std::cout << "[Generate] Wrote: " << options.outputFile << std::endl;
+            std::cout << "[Generate] Wrote: " << outFile.getFullPathName() << std::endl;
             return 0;
         }
         else

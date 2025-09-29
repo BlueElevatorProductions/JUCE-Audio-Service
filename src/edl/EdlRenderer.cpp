@@ -54,7 +54,7 @@ bool EdlRenderer::renderTimeRange(const EdlCompiler::CompiledEdl& compiledEdl,
 
     // Determine max channels needed
     int maxChannels = 2; // Default stereo
-    for (const auto& track : compiledEdl.tracks()) {
+    for (const auto& track : compiledEdl.tracks) {
         for (const auto& clip : track.clips) {
             if (clip.media && clip.media->channels() > maxChannels) {
                 maxChannels = clip.media->channels();
@@ -81,7 +81,7 @@ bool EdlRenderer::renderTimeRange(const EdlCompiler::CompiledEdl& compiledEdl,
         mixBuffer.clear();
 
         // Render each track into mix buffer
-        for (const auto& track : compiledEdl.tracks()) {
+        for (const auto& track : compiledEdl.tracks) {
             if (!track.muted) {
                 renderTrack(track, blockStart, blockEnd, mixBuffer, 0);
             }

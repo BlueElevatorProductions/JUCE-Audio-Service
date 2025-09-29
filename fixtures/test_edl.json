@@ -1,0 +1,27 @@
+{
+  "sample_rate": 48000,
+  "media": [
+    {
+      "id": "m1",
+      "path": "fixtures/test_voice.wav",
+      "channels": 1,
+      "sample_rate": 48000,
+      "duration_samples": 24000
+    }
+  ],
+  "tracks": [
+    {
+      "id": "t1",
+      "name": "Track 1",
+      "clips": [
+        {
+          "id": "c1",
+          "media_id": "m1",
+          "start_in_parent": 0,
+          "start_in_media": 0,
+          "duration": 12000
+        }
+      ]
+    }
+  ]
+}
