@@ -67,21 +67,11 @@ private:
         return ss.str();
     }
 
-public:
-    AudioEngineServiceImpl() : renderer(std::make_unique<juceaudioservice::OfflineRenderer>()) {
-        std::cout << "[gRPC] AudioEngine service initialized" << std::endl;
-    }
-
-    Status LoadFile(ServerContext* context, const audio_engine::LoadFileRequest* request,
-                   audio_engine::LoadFileResponse* response) override {
-
-        std::cout << "[gRPC] LoadFile request for: " << request->file_path() << std::endl;
-
-        const std::string& inputPath = request->file_path();
-
+    // Helper method to load a file into currentAudioSource
+    Status loadFileInternal(const std::string& inputPath, std::string& resolvedPath) {
         // Handle absolute vs relative paths using JUCE
         juce::File file(inputPath);
-        if (!file.isAbsolute()) {
+        if (!juce::File::isAbsolutePath(inputPath)) {
             file = juce::File::getCurrentWorkingDirectory().getChildFile(inputPath);
         }
 
@@ -111,12 +101,36 @@ public:
                          "Failed to load audio file: " + file.getFullPathName().toStdString());
         }
 
+        // Store resolved path for caller
+        resolvedPath = file.getFullPathName().toStdString();
+        return Status::OK;
+    }
+
+public:
+    AudioEngineServiceImpl() : renderer(std::make_unique<juceaudioservice::OfflineRenderer>()) {
+        std::cout << "[gRPC] AudioEngine service initialized" << std::endl;
+    }
+
+    Status LoadFile(ServerContext* context, const audio_engine::LoadFileRequest* request,
+                   audio_engine::LoadFileResponse* response) override {
+
+        std::cout << "[gRPC] LoadFile request for: " << request->file_path() << std::endl;
+
+        const std::string& inputPath = request->file_path();
+        std::string resolvedPath;
+
+        // Use helper method to load the file
+        Status loadStatus = loadFileInternal(inputPath, resolvedPath);
+        if (!loadStatus.ok()) {
+            return loadStatus;
+        }
+
         // Success - populate response with file info
         response->set_success(true);
         response->set_message("File loaded successfully");
 
         auto* fileInfo = response->mutable_file_info();
-        fileInfo->set_path(file.getFullPathName().toStdString());
+        fileInfo->set_path(resolvedPath);
         fileInfo->set_sample_rate(static_cast<int32_t>(currentAudioSource->getSampleRate()));
         fileInfo->set_num_channels(currentAudioSource->getNumChannels());
 
@@ -125,9 +139,11 @@ public:
             fileInfo->set_duration_seconds(static_cast<double>(currentAudioSource->getTotalLength()) / sampleRate);
         }
 
+        // Get file size from resolved path
+        juce::File file(resolvedPath);
         fileInfo->set_file_size_bytes(file.getSize());
 
-        std::cout << "[gRPC] LoadFile successful: " << file.getFullPathName().toStdString() << " ("
+        std::cout << "[gRPC] LoadFile successful: " << resolvedPath << " ("
                   << fileInfo->duration_seconds() << "s, "
                   << fileInfo->sample_rate() << "Hz, "
                   << fileInfo->num_channels() << " channels)" << std::endl;
@@ -141,14 +157,33 @@ public:
         std::cout << "[gRPC] Render request: " << request->input_file()
                   << " -> " << request->output_file() << std::endl;
 
+        // Lazy-load if nothing is loaded yet
         if (!currentAudioSource || !currentAudioSource->isLoaded()) {
-            audio_engine::RenderResponse response;
-            auto* error = response.mutable_error();
-            error->set_error_code("NO_FILE_LOADED");
-            error->set_error_message("No audio file is currently loaded. Call LoadFile first.");
-            writer->Write(response);
-            std::cout << "[gRPC] Render failed: no file loaded" << std::endl;
-            return Status::OK;
+            const std::string& inputFile = request->input_file();
+            if (inputFile.empty()) {
+                audio_engine::RenderResponse response;
+                auto* error = response.mutable_error();
+                error->set_error_code("NO_FILE_LOADED");
+                error->set_error_message("No audio file is currently loaded and no input file provided.");
+                writer->Write(response);
+                std::cout << "[gRPC] Render failed: no file loaded and no input file provided" << std::endl;
+                return Status::OK;
+            }
+
+            // Attempt to lazy-load the input file
+            std::string resolvedPath;
+            Status loadStatus = loadFileInternal(inputFile, resolvedPath);
+            if (!loadStatus.ok()) {
+                audio_engine::RenderResponse response;
+                auto* error = response.mutable_error();
+                error->set_error_code("LAZY_LOAD_FAILED");
+                error->set_error_message("Failed to lazy-load input file: " + loadStatus.error_message());
+                writer->Write(response);
+                std::cout << "[gRPC] Render failed: lazy-load failed - " << loadStatus.error_message() << std::endl;
+                return Status::OK;
+            }
+
+            std::cout << "[gRPC] Lazy-loaded input for render: " << resolvedPath << std::endl;
         }
 
         auto startTime = std::chrono::steady_clock::now();

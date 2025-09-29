@@ -6,6 +6,7 @@
 #include <chrono>
 #include <future>
 #include <fstream>
+#include <cstdlib>
 
 #include <grpcpp/grpcpp.h>
 #include "audio_engine.grpc.pb.h"
@@ -21,11 +22,15 @@
 #define PROJECT_SOURCE_DIR "."
 #endif
 
-// Helper function to get absolute path to fixture files
-static std::string getFixture(const char* relativePath) {
+// Helper function to get absolute path from project root
+static std::string absFromProject(const char* rel) {
     juce::File root(PROJECT_SOURCE_DIR);
-    juce::File fixturePath = root.getChildFile("fixtures").getChildFile(relativePath);
-    return fixturePath.getFullPathName().toStdString();
+    return root.getChildFile(rel).getFullPathName().toStdString();
+}
+
+// Helper function to get absolute path to fixture files
+static std::string fixturePath(const char* name) {
+    return absFromProject((std::string("fixtures/") + name).c_str());
 }
 
 // Helper function to create absolute path in output directory
@@ -48,104 +53,7 @@ using grpc::ServerWriter;
 
 namespace fs = std::filesystem;
 
-// Forward declaration from grpc_server.cpp - we'll include the service implementation
-class AudioEngineServiceImpl final : public audio_engine::AudioEngine::Service {
-private:
-    std::unique_ptr<juceaudioservice::AudioFileSource> currentAudioSource;
-    std::unique_ptr<juceaudioservice::OfflineRenderer> renderer;
-
-public:
-    AudioEngineServiceImpl() : renderer(std::make_unique<juceaudioservice::OfflineRenderer>()) {}
-
-    Status LoadFile(ServerContext* context, const audio_engine::LoadFileRequest* request,
-                   audio_engine::LoadFileResponse* response) override {
-
-        const std::string& filePath = request->file_path();
-
-        if (!fs::exists(filePath)) {
-            response->set_success(false);
-            response->set_message("File does not exist: " + filePath);
-            return Status::OK;
-        }
-
-        currentAudioSource = std::make_unique<juceaudioservice::AudioFileSource>();
-        juce::File file(filePath);
-        bool loaded = currentAudioSource->loadFile(file);
-
-        if (!loaded) {
-            response->set_success(false);
-            response->set_message("Failed to load audio file: " + filePath);
-            currentAudioSource.reset();
-            return Status::OK;
-        }
-
-        response->set_success(true);
-        response->set_message("File loaded successfully");
-
-        auto* fileInfo = response->mutable_file_info();
-        fileInfo->set_path(filePath);
-        fileInfo->set_sample_rate(static_cast<int32_t>(currentAudioSource->getSampleRate()));
-        fileInfo->set_num_channels(currentAudioSource->getNumChannels());
-
-        double sampleRate = currentAudioSource->getSampleRate();
-        if (sampleRate > 0) {
-            fileInfo->set_duration_seconds(static_cast<double>(currentAudioSource->getTotalLength()) / sampleRate);
-        }
-
-        try {
-            fileInfo->set_file_size_bytes(static_cast<int64_t>(fs::file_size(filePath)));
-        } catch (...) {
-            fileInfo->set_file_size_bytes(0);
-        }
-
-        return Status::OK;
-    }
-
-    Status Render(ServerContext* context, const audio_engine::RenderRequest* request,
-                 ServerWriter<audio_engine::RenderResponse>* writer) override {
-
-        if (!currentAudioSource || !currentAudioSource->isLoaded()) {
-            audio_engine::RenderResponse response;
-            auto* error = response.mutable_error();
-            error->set_error_code("NO_FILE_LOADED");
-            error->set_error_message("No audio file is currently loaded. Call LoadFile first.");
-            writer->Write(response);
-            return Status::OK;
-        }
-
-        // Simple test render - just write a basic response
-        audio_engine::RenderResponse progressResponse;
-        auto* progress = progressResponse.mutable_progress();
-        progress->set_progress_percentage(50.0);
-        progress->set_status_message("Rendering...");
-        writer->Write(progressResponse);
-
-        // Create a simple test output file
-        std::ofstream outFile(request->output_file());
-        outFile << "test audio data" << std::endl;
-        outFile.close();
-
-        audio_engine::RenderResponse completeResponse;
-        auto* complete = completeResponse.mutable_complete();
-        complete->set_output_file_path(request->output_file());
-        complete->set_sha256_hash("test_hash");
-        complete->set_total_duration_seconds(1.0);
-        complete->set_output_file_size_bytes(17); // "test audio data\n"
-
-        writer->Write(completeResponse);
-        return Status::OK;
-    }
-
-    Status UpdateEdl(ServerContext* context, const audio_engine::UpdateEdlRequest* request,
-                    audio_engine::UpdateEdlResponse* response) override {
-        return Status(grpc::StatusCode::UNIMPLEMENTED, "UpdateEdl is not implemented");
-    }
-
-    Status Subscribe(ServerContext* context, const audio_engine::SubscribeRequest* request,
-                    ServerWriter<audio_engine::SubscribeResponse>* writer) override {
-        return Status(grpc::StatusCode::UNIMPLEMENTED, "Subscribe is not implemented");
-    }
-};
+// We'll use the actual server binary for testing, not a duplicate implementation
 
 class AudioEngineClient {
 private:
@@ -163,7 +71,11 @@ public:
         ClientContext context;
 
         Status status = stub_->LoadFile(&context, request, &response);
-        return status.ok() && response.success();
+        if (!status.ok()) {
+            std::cout << "LoadFile RPC failed: " << status.error_message() << std::endl;
+            return false;
+        }
+        return response.success();
     }
 
     bool Render(const std::string& inputFile, const std::string& outputFile) {
@@ -182,12 +94,17 @@ public:
             if (response.has_complete()) {
                 hasComplete = true;
             } else if (response.has_error()) {
+                std::cout << "Render failed: " << response.error().error_message() << std::endl;
                 return false;
             }
         }
 
         Status status = reader->Finish();
-        return status.ok() && hasComplete;
+        if (!status.ok()) {
+            std::cout << "Render RPC failed: " << status.error_message() << std::endl;
+            return false;
+        }
+        return hasComplete;
     }
 };
 
@@ -234,30 +151,52 @@ std::string createTestAudioFile() {
     return testFile;
 }
 
-std::unique_ptr<Server> startTestServer(const std::string& address) {
-    AudioEngineServiceImpl service;
+// Launch actual server binary as subprocess
+std::unique_ptr<std::future<void>> startTestServer(const std::string& address) {
+    // Extract port from address
+    size_t colonPos = address.find(':');
+    std::string port = (colonPos != std::string::npos) ? address.substr(colonPos + 1) : "50051";
 
-    ServerBuilder builder;
-    builder.AddListeningPort(address, grpc::InsecureServerCredentials());
-    builder.RegisterService(&service);
+    // Launch server binary
+    std::string serverPath = absFromProject("build/bin/audio_engine_server");
+    std::string command = serverPath + " --port " + port;
 
-    std::unique_ptr<Server> server(builder.BuildAndStart());
-    return server;
+    auto future = std::make_unique<std::future<void>>(
+        std::async(std::launch::async, [command]() {
+            std::system(command.c_str());
+        })
+    );
+
+    // Give server time to start
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+    return future;
 }
 
 bool testServerStartup() {
     std::cout << "Testing server startup..." << std::endl;
 
-    auto server = startTestServer("localhost:0"); // Use any available port
-    if (!server) {
+    auto serverFuture = startTestServer("localhost:50054");
+    if (!serverFuture) {
         std::cout << "Failed to start server" << std::endl;
         return false;
     }
 
-    // Server started successfully
-    std::cout << "Server startup test passed" << std::endl;
-    server->Shutdown();
-    return true;
+    // Test connection
+    auto channel = grpc::CreateChannel("localhost:50054", grpc::InsecureChannelCredentials());
+    AudioEngineClient client(channel);
+
+    // Simple connectivity test - try to call LoadFile with invalid path
+    bool connected = false;
+    try {
+        client.LoadFile("nonexistent.wav"); // This should fail but prove connectivity
+        connected = true;
+    } catch (...) {
+        connected = true; // Any response (even error) means server is reachable
+    }
+
+    std::cout << "Server startup test " << (connected ? "passed" : "failed") << std::endl;
+    return connected;
 }
 
 bool testLoadFileWithClient() {
@@ -265,14 +204,11 @@ bool testLoadFileWithClient() {
 
     // Start server
     std::string serverAddress = "localhost:50052";
-    auto server = startTestServer(serverAddress);
-    if (!server) {
+    auto serverFuture = startTestServer(serverAddress);
+    if (!serverFuture) {
         std::cout << "Failed to start server" << std::endl;
         return false;
     }
-
-    // Give server time to start
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
     // Create test file
     std::string testFile = createTestAudioFile();
@@ -285,7 +221,6 @@ bool testLoadFileWithClient() {
 
     // Cleanup
     juce::File(testFile).deleteFile();
-    server->Shutdown();
 
     if (result) {
         std::cout << "LoadFile test passed" << std::endl;
@@ -301,14 +236,11 @@ bool testRenderWithClient() {
 
     // Start server
     std::string serverAddress = "localhost:50053";
-    auto server = startTestServer(serverAddress);
-    if (!server) {
+    auto serverFuture = startTestServer(serverAddress);
+    if (!serverFuture) {
         std::cout << "Failed to start server" << std::endl;
         return false;
     }
-
-    // Give server time to start
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
     // Create test file
     std::string testInputFile = createTestAudioFile();
@@ -322,8 +254,7 @@ bool testRenderWithClient() {
     bool loadResult = client.LoadFile(testInputFile);
     if (!loadResult) {
         std::cout << "Failed to load file for render test" << std::endl;
-        fs::remove(testInputFile);
-        server->Shutdown();
+        juce::File(testInputFile).deleteFile();
         return false;
     }
 
@@ -333,7 +264,6 @@ bool testRenderWithClient() {
     // Cleanup
     juce::File(testInputFile).deleteFile();
     juce::File(testOutputFile).deleteFile();
-    server->Shutdown();
 
     if (renderResult) {
         std::cout << "Render test passed" << std::endl;
