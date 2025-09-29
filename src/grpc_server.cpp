@@ -15,10 +15,18 @@
 #include "audio_engine.grpc.pb.h"
 #include "JuceAudioService/AudioFileSource.h"
 #include "JuceAudioService/OfflineRenderer.h"
+#include "edl/EdlStore.h"
+#include "edl/EdlCompiler.h"
+#include "edl/EdlRenderer.h"
+#include "util/EdlJson.h"
 
 #include <juce_core/juce_core.h>
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <openssl/sha.h>
+#include <queue>
+#include <atomic>
+#include <condition_variable>
+#include <set>
 
 using grpc::Server;
 using grpc::ServerBuilder;
@@ -29,10 +37,48 @@ using grpc::StatusCode;
 
 namespace fs = std::filesystem;
 
+// Event broadcasting system
+class EventBroadcaster {
+public:
+    using Subscriber = grpc::ServerWriter<audio_engine::EngineEvent>*;
+
+    void subscribe(Subscriber writer) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        subscribers_.insert(writer);
+    }
+
+    void unsubscribe(Subscriber writer) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        subscribers_.erase(writer);
+    }
+
+    void broadcast(const audio_engine::EngineEvent& event) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (auto writer : subscribers_) {
+            if (writer) {
+                writer->Write(event);
+            }
+        }
+    }
+
+private:
+    std::mutex mutex_;
+    std::set<Subscriber> subscribers_;
+};
+
 class AudioEngineServiceImpl final : public audio_engine::AudioEngine::Service {
 private:
     std::unique_ptr<juceaudioservice::AudioFileSource> currentAudioSource;
     std::unique_ptr<juceaudioservice::OfflineRenderer> renderer;
+
+    // EDL components
+    juceaudioservice::EdlStore edlStore_;
+    juceaudioservice::EdlCompiler edlCompiler_;
+    juceaudioservice::EdlRenderer edlRenderer_;
+
+    // Event broadcasting
+    EventBroadcaster eventBroadcaster_;
+    std::atomic<bool> running_{true};
 
     std::string calculateSHA256(const std::string& filePath) {
         std::ifstream file(filePath, std::ios::binary);
@@ -369,20 +415,220 @@ public:
 
     Status UpdateEdl(ServerContext* context, const audio_engine::UpdateEdlRequest* request,
                     audio_engine::UpdateEdlResponse* response) override {
-        std::cout << "[gRPC] UpdateEdl called (UNIMPLEMENTED)" << std::endl;
-        return Status(StatusCode::UNIMPLEMENTED, "UpdateEdl is not implemented");
+
+        std::cout << "[gRPC] UpdateEdl request for EDL: " << request->edl().id() << std::endl;
+
+        const auto& edl = request->edl();
+
+        // Validate and store EDL
+        juceaudioservice::EdlStore::Snapshot snapshot;
+        std::string error;
+
+        std::cout << "[EDL][Validate] Starting validation for EDL: " << edl.id() << std::endl;
+
+        bool success = edlStore_.replace(edl, snapshot, error);
+
+        if (!success) {
+            std::cout << "[EDL][Validate] Failed for EDL " << edl.id() << ": " << error << std::endl;
+
+            // Broadcast error event
+            audio_engine::EngineEvent errorEvent;
+            auto* edlError = errorEvent.mutable_edl_error();
+            edlError->set_edl_id(edl.id());
+            edlError->set_reason(error);
+            eventBroadcaster_.broadcast(errorEvent);
+
+            return Status(StatusCode::INVALID_ARGUMENT, error);
+        }
+
+        std::cout << "[EDL][Apply] Successfully applied EDL: " << snapshot.edl.id()
+                  << " revision: " << snapshot.revision
+                  << " tracks: " << snapshot.track_count
+                  << " clips: " << snapshot.clip_count << std::endl;
+
+        // Populate response
+        response->set_edl_id(snapshot.edl.id());
+        response->set_revision(snapshot.revision);
+        response->set_track_count(snapshot.track_count);
+        response->set_clip_count(snapshot.clip_count);
+
+        // Broadcast success event
+        audio_engine::EngineEvent appliedEvent;
+        auto* edlApplied = appliedEvent.mutable_edl_applied();
+        edlApplied->set_edl_id(snapshot.edl.id());
+        edlApplied->set_revision(snapshot.revision);
+        edlApplied->set_track_count(snapshot.track_count);
+        edlApplied->set_clip_count(snapshot.clip_count);
+        eventBroadcaster_.broadcast(appliedEvent);
+
+        return Status::OK;
     }
 
     Status RenderEdlWindow(ServerContext* context, const audio_engine::RenderEdlWindowRequest* request,
                            ServerWriter<audio_engine::EngineEvent>* writer) override {
-        std::cout << "[gRPC] RenderEdlWindow called (UNIMPLEMENTED)" << std::endl;
-        return Status(StatusCode::UNIMPLEMENTED, "RenderEdlWindow is not implemented");
+
+        std::cout << "[gRPC] RenderEdlWindow request for EDL: " << request->edl_id()
+                  << " range: " << request->range().start_samples() << "-"
+                  << (request->range().start_samples() + request->range().duration_samples()) << std::endl;
+
+        // Get current EDL snapshot
+        auto edlSnapshot = edlStore_.get();
+        if (!edlSnapshot) {
+            audio_engine::EngineEvent errorEvent;
+            auto* edlError = errorEvent.mutable_edl_error();
+            edlError->set_edl_id(request->edl_id());
+            edlError->set_reason("No EDL currently loaded");
+            writer->Write(errorEvent);
+            return Status(StatusCode::NOT_FOUND, "No EDL currently loaded");
+        }
+
+        if (edlSnapshot->edl.id() != request->edl_id()) {
+            audio_engine::EngineEvent errorEvent;
+            auto* edlError = errorEvent.mutable_edl_error();
+            edlError->set_edl_id(request->edl_id());
+            edlError->set_reason("EDL ID mismatch: requested '" + request->edl_id() +
+                               "' but current is '" + edlSnapshot->edl.id() + "'");
+            writer->Write(errorEvent);
+            return Status(StatusCode::NOT_FOUND, "EDL ID mismatch");
+        }
+
+        // Compile EDL
+        juceaudioservice::EdlCompiler::CompiledEdl compiledEdl;
+        std::string error;
+
+        std::cout << "[EDL][Compile] Starting compilation for render..." << std::endl;
+
+        if (!edlCompiler_.compile(*edlSnapshot, compiledEdl, error)) {
+            std::cout << "[EDL][Compile] Failed: " << error << std::endl;
+
+            audio_engine::EngineEvent errorEvent;
+            auto* edlError = errorEvent.mutable_edl_error();
+            edlError->set_edl_id(request->edl_id());
+            edlError->set_reason("Compilation failed: " + error);
+            writer->Write(errorEvent);
+            return Status(StatusCode::INTERNAL, "EDL compilation failed: " + error);
+        }
+
+        // Determine bit depth
+        juceaudioservice::EdlRenderer::BitDepth bitDepth = juceaudioservice::EdlRenderer::BitDepth::Float32;
+        switch (request->bit_depth()) {
+            case 16: bitDepth = juceaudioservice::EdlRenderer::BitDepth::Int16; break;
+            case 24: bitDepth = juceaudioservice::EdlRenderer::BitDepth::Int24; break;
+            case 32: bitDepth = juceaudioservice::EdlRenderer::BitDepth::Float32; break;
+            default:
+                std::cout << "[EDL][Render] Invalid bit depth " << request->bit_depth() << ", using 32-bit float" << std::endl;
+                break;
+        }
+
+        // Setup progress callback
+        auto progressCallback = [writer, this](double fraction) {
+            audio_engine::EngineEvent progressEvent;
+            auto* progress = progressEvent.mutable_progress();
+            progress->set_fraction(fraction);
+
+            // Calculate ETA
+            static auto startTime = std::chrono::steady_clock::now();
+            if (fraction > 0.01) { // Only calculate ETA after 1%
+                auto elapsed = std::chrono::steady_clock::now() - startTime;
+                auto totalTime = elapsed / fraction;
+                auto remaining = totalTime - elapsed;
+                auto remainingSeconds = std::chrono::duration<double>(remaining).count();
+
+                std::ostringstream ss;
+                ss << std::fixed << std::setprecision(1) << remainingSeconds << "s";
+                progress->set_eta(ss.str());
+            }
+
+            writer->Write(progressEvent);
+        };
+
+        // Render to WAV file
+        std::cout << "[EDL][Render] Starting render to: " << request->out_path() << std::endl;
+
+        bool renderSuccess = edlRenderer_.renderToWav(compiledEdl, request->range(),
+                                                     request->out_path(), bitDepth,
+                                                     progressCallback, error);
+
+        if (!renderSuccess) {
+            std::cout << "[EDL][Render] Failed: " << error << std::endl;
+            return Status(StatusCode::INTERNAL, "Render failed: " + error);
+        }
+
+        // Calculate output file info
+        juce::File outputFile(request->out_path());
+        double durationSeconds = static_cast<double>(request->range().duration_samples()) / compiledEdl.sample_rate;
+        std::string sha256Hash = calculateSHA256(request->out_path());
+
+        // Send completion event
+        audio_engine::EngineEvent completeEvent;
+        auto* complete = completeEvent.mutable_complete();
+        complete->set_out_path(request->out_path());
+        complete->set_duration_sec(durationSeconds);
+        complete->set_sha256(sha256Hash);
+        writer->Write(completeEvent);
+
+        std::cout << "[EDL][Render] Completed successfully: " << request->out_path()
+                  << " (" << durationSeconds << "s, SHA256: " << sha256Hash.substr(0, 16) << "...)" << std::endl;
+
+        return Status::OK;
     }
 
     Status Subscribe(ServerContext* context, const audio_engine::SubscribeRequest* request,
                     ServerWriter<audio_engine::EngineEvent>* writer) override {
-        std::cout << "[gRPC] Subscribe called (UNIMPLEMENTED)" << std::endl;
-        return Status(StatusCode::UNIMPLEMENTED, "Subscribe is not implemented");
+
+        std::cout << "[gRPC] Subscribe request for session: " << request->session() << std::endl;
+
+        // Register subscriber
+        eventBroadcaster_.subscribe(writer);
+
+        // Send initial backend status
+        audio_engine::EngineEvent statusEvent;
+        auto* backend = statusEvent.mutable_backend();
+        backend->set_status("ready");
+        writer->Write(statusEvent);
+
+        // Send current EDL status if available
+        auto edlSnapshot = edlStore_.get();
+        if (edlSnapshot) {
+            audio_engine::EngineEvent edlEvent;
+            auto* edlApplied = edlEvent.mutable_edl_applied();
+            edlApplied->set_edl_id(edlSnapshot->edl.id());
+            edlApplied->set_revision(edlSnapshot->revision);
+            edlApplied->set_track_count(edlSnapshot->track_count);
+            edlApplied->set_clip_count(edlSnapshot->clip_count);
+            writer->Write(edlEvent);
+        }
+
+        std::cout << "[gRPC][Event] Subscriber registered for session: " << request->session() << std::endl;
+
+        // Keep connection alive with periodic heartbeats
+        auto lastHeartbeat = std::chrono::steady_clock::now();
+        const auto heartbeatInterval = std::chrono::seconds(2);
+
+        while (!context->IsCancelled() && running_) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+            auto now = std::chrono::steady_clock::now();
+            if (now - lastHeartbeat >= heartbeatInterval) {
+                audio_engine::EngineEvent heartbeatEvent;
+                auto* heartbeat = heartbeatEvent.mutable_heartbeat();
+                auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    now.time_since_epoch()).count();
+                heartbeat->set_monotonic_ms(timestamp);
+
+                if (!writer->Write(heartbeatEvent)) {
+                    break; // Client disconnected
+                }
+
+                lastHeartbeat = now;
+            }
+        }
+
+        // Unregister subscriber
+        eventBroadcaster_.unsubscribe(writer);
+        std::cout << "[gRPC][Event] Subscriber disconnected for session: " << request->session() << std::endl;
+
+        return Status::OK;
     }
 };
 

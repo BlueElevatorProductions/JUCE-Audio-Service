@@ -150,6 +150,10 @@ if(ENABLE_GRPC)
     # gRPC server executable
     add_executable(audio_engine_server
         src/grpc_server.cpp
+        src/edl/EdlStore.cpp
+        src/edl/EdlCompiler.cpp
+        src/edl/EdlRenderer.cpp
+        src/util/EdlJson.cpp
     )
     target_link_libraries(audio_engine_server
         PRIVATE
@@ -159,6 +163,11 @@ if(ENABLE_GRPC)
             gRPC::grpc++_alts           # ALTS support
             gRPC::grpc++_reflection     # <-- required for InitProtoReflectionServerBuilderPlugin()
             protobuf::libprotobuf
+    )
+
+    target_include_directories(audio_engine_server
+        PRIVATE
+            ${CMAKE_SOURCE_DIR}/src
     )
 
     # Set output directory for server binary
