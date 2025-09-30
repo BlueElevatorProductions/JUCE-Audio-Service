@@ -95,6 +95,53 @@ RENDER_DUR_SEC=0.25    # Render duration in seconds
 
 ⸻
 
+## 🎙️ One-Click with Transcription
+
+Add automatic audio transcription to your Google Docs workflow:
+
+1. **Open Finder** → Navigate to `JUCE-Audio-Service/scripts/`
+2. **Double-click** `one_click_docs.command`
+3. **Select audio file** → File picker appears for AIFF/WAV/MP3/M4A/etc.
+4. **Paste Google Doc link** → Dialog prompts for Doc URL
+5. **Watch it run**: The script will automatically:
+   - Transcribe audio locally using OpenAI Whisper (on-device)
+   - Insert transcript text and SRT subtitles into the Google Doc
+   - Build the project with gRPC enabled
+   - Start the audio engine server
+   - Launch the Docs Bridge
+   - Open the Google Doc, dashboard, and output folder
+
+**Requirements:**
+- macOS (Apple Silicon recommended)
+- ffmpeg (auto-installs via Homebrew if available)
+- Google OAuth credentials (same as Docs Bridge setup)
+- Internet connection for first Whisper model download (~140MB for small.en)
+
+**What gets inserted into your Doc:**
+- **Heading**: "Transcript: [filename]"
+- **Full transcript text** (plain text, chunked for large files)
+- **SRT subtitles** (code block with timestamps)
+
+**Output files:**
+- `out/transcripts/[filename].txt` — Plain text transcript
+- `out/transcripts/[filename].srt` — Subtitle file
+
+**Customization:**
+Edit environment variables at the top of `scripts/one_click_docs.sh`:
+```bash
+WHISPER_MODEL=small.en  # Options: tiny.en, base.en, small.en, medium.en, large
+PORT=50051              # Server port
+BRIDGE_PORT=8080        # HTTP dashboard port
+```
+
+**Troubleshooting:**
+- **First run slow?** Whisper downloads model on first use (~140MB for small.en)
+- **ffmpeg missing?** Script attempts auto-install via Homebrew
+- **Transcription failed?** Check `.run/bridge.log` for Python errors
+- **OAuth issues?** See `README_docs_bridge.md` for credential setup
+
+⸻
+
 🎯 gRPC Server Usage
 
 When built with `-DENABLE_GRPC=ON`, two additional executables are created:

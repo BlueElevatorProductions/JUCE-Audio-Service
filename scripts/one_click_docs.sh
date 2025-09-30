@@ -10,6 +10,7 @@ set -euo pipefail
 : ${BRIDGE_PORT:=8080}
 : ${PY_STUB_DIR:=tools/docs_bridge/stubs}
 : ${HEALTH_URL:=http://127.0.0.1:8080/health}
+: ${WHISPER_MODEL:=small.en}
 # ===================================
 
 SCRIPT_DIR="${0:A:h}"
@@ -76,7 +77,23 @@ parse_doc_id() {
   fi
 }
 
-bold "Step 1/8 — Parse Google Doc URL"
+bold "Step 1/10 — Select audio file to transcribe"
+
+# Choose audio file via AppleScript file picker
+AUDIO_PATH=$(osascript <<'APPLESCRIPT' 2>/dev/null || echo ""
+  set audioFile to choose file with prompt "Select an audio file to transcribe:" of type {"public.audio"}
+  POSIX path of audioFile
+APPLESCRIPT
+)
+
+if [[ -z "$AUDIO_PATH" ]]; then
+  err "No audio file selected. Cancelled."
+  exit 1
+fi
+
+ok "Audio file: $AUDIO_PATH"
+
+bold "Step 2/10 — Parse Google Doc URL"
 
 # Get doc URL from args, env, or GUI dialog
 DOC_URL=""
@@ -124,7 +141,7 @@ fi
 
 ok "Doc ID: $DOC_ID"
 
-bold "Step 2/8 — Build project (ENABLE_GRPC=ON)"
+bold "Step 3/10 — Build project (ENABLE_GRPC=ON)"
 cmake -S "$REPO_ROOT" -B "$BUILD_DIR" \
   -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
   -DENABLE_GRPC=ON \
@@ -139,7 +156,7 @@ ok "Build complete."
 SERVER_BIN="$BUILD_DIR/bin/audio_engine_server"
 [[ -x "$SERVER_BIN" ]] || { err "Server binary not found: $SERVER_BIN"; tail -n 120 "$SERVER_LOG" || true; exit 1; }
 
-bold "Step 3/8 — Start audio engine server on :$PORT"
+bold "Step 4/10 — Start audio engine server on :$PORT"
 "$SERVER_BIN" --port "$PORT" >> "$SERVER_LOG" 2>&1 & echo $! > "$SERVER_PID"
 
 # Wait until server prints 'Listening'
@@ -152,7 +169,7 @@ for i in {1..100}; do
   [[ $i -eq 100 ]] && { err "Server did not start. See $SERVER_LOG"; open -R "$SERVER_LOG" || true; exit 1; }
 done
 
-bold "Step 4/8 — Setup Python environment"
+bold "Step 5/10 — Setup Python environment"
 if [[ ! -d "$VENV_DIR" ]]; then
   python3 -m venv "$VENV_DIR" >>"$BRIDGE_LOG" 2>&1
   ok "Created venv."
@@ -165,7 +182,64 @@ pip install -q --upgrade pip >>"$BRIDGE_LOG" 2>&1
 pip install -q -r "$REPO_ROOT/tools/docs_bridge/requirements.txt" >>"$BRIDGE_LOG" 2>&1
 ok "Python packages installed."
 
-bold "Step 5/8 — Generate Python gRPC stubs"
+bold "Step 6/10 — Check ffmpeg and transcribe audio"
+
+# Check ffmpeg availability
+if ! command -v ffmpeg >/dev/null 2>&1; then
+  warn "ffmpeg not found. Attempting to install via Homebrew..."
+  if command -v brew >/dev/null 2>&1; then
+    brew install ffmpeg || { err "Failed to install ffmpeg via Homebrew"; exit 1; }
+    ok "ffmpeg installed."
+  else
+    err "ffmpeg not found and Homebrew not available."
+    print "\nPlease install ffmpeg manually:"
+    print "  brew install ffmpeg"
+    exit 1
+  fi
+else
+  ok "ffmpeg is available."
+fi
+
+# Transcribe audio
+TRANS_OUT_DIR="$OUT_DIR/transcripts"
+mkdir -p "$TRANS_OUT_DIR"
+
+print "Transcribing audio (model: $WHISPER_MODEL)..."
+TRANS_JSON=$(python "$REPO_ROOT/tools/docs_bridge/transcribe.py" \
+  --audio "$AUDIO_PATH" \
+  --out-dir "$TRANS_OUT_DIR" \
+  --model "$WHISPER_MODEL" 2>&1)
+
+# Validate JSON output
+if ! echo "$TRANS_JSON" | grep -q '"txt"'; then
+  err "Transcription failed"
+  print "$TRANS_JSON"
+  exit 1
+fi
+
+# Parse JSON to extract paths
+TXT_PATH=$(echo "$TRANS_JSON" | python3 -c "import sys, json; print(json.loads(sys.stdin.read())['txt'])")
+SRT_PATH=$(echo "$TRANS_JSON" | python3 -c "import sys, json; print(json.loads(sys.stdin.read()).get('srt', ''))")
+TRANS_DUR=$(echo "$TRANS_JSON" | python3 -c "import sys, json; print(json.loads(sys.stdin.read())['duration_sec'])")
+
+ok "Transcription complete (${TRANS_DUR}s)"
+ok "Transcript: $TXT_PATH"
+[[ -n "$SRT_PATH" ]] && ok "Subtitles: $SRT_PATH"
+
+bold "Step 7/10 — Push transcript to Google Doc"
+
+TRANS_TITLE="Transcript: $(basename "$AUDIO_PATH")"
+
+python "$REPO_ROOT/tools/docs_bridge/push_transcript.py" \
+  --doc-id "$DOC_ID" \
+  --title "$TRANS_TITLE" \
+  --txt "$TXT_PATH" \
+  ${SRT_PATH:+--srt "$SRT_PATH"} \
+  || { err "Failed to push transcript to Google Doc"; exit 1; }
+
+ok "Transcript appended to Google Doc."
+
+bold "Step 8/10 — Generate Python gRPC stubs"
 python -m grpc_tools.protoc \
   -I "$REPO_ROOT/proto" \
   --python_out="$REPO_ROOT/$PY_STUB_DIR" \
@@ -174,7 +248,7 @@ python -m grpc_tools.protoc \
 
 ok "Python stubs generated at $PY_STUB_DIR"
 
-bold "Step 6/8 — Start Docs Bridge"
+bold "Step 9/10 — Start Docs Bridge"
 : "${PYTHONPATH:=}"
 export PYTHONPATH="$REPO_ROOT:$REPO_ROOT/$PY_STUB_DIR:${PYTHONPATH}"
 
@@ -188,7 +262,7 @@ python bridge.py \
 cd "$REPO_ROOT"
 ok "Bridge started (PID: $(cat "$BRIDGE_PID"))."
 
-bold "Step 7/8 — Wait for health check"
+# Wait for health check
 echo "Checking http://127.0.0.1:8080/health ..."
 READY=0
 for i in {1..60}; do
@@ -212,7 +286,7 @@ if [ "$READY" -ne 1 ]; then
   exit 1
 fi
 
-bold "Step 8/8 — Open dashboard & doc"
+bold "Step 10/10 — Open dashboard & doc"
 DOC_FULL_URL="https://docs.google.com/document/d/$DOC_ID/edit"
 
 ok "Opening Google Doc..."
@@ -229,6 +303,7 @@ ok "SUCCESS. Docs Bridge is running!"
 print ""
 print "Dashboard: http://127.0.0.1:$BRIDGE_PORT"
 print "Google Doc: $DOC_FULL_URL"
+print "Transcript: $TXT_PATH"
 print "Server log: $SERVER_LOG"
 print "Bridge log: $BRIDGE_LOG"
 print ""

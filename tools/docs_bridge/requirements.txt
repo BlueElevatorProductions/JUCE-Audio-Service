@@ -4,3 +4,5 @@ google-api-python-client
 grpcio
 grpcio-tools
 flask
+openai-whisper==20231117
+tqdm>=4.66
