@@ -55,6 +55,43 @@ cd build && ctest -R GrpcEdlIntegrationTest -V
 
 **Note:** This project is Apple Silicon only. The first gRPC build will take longer as it downloads and caches dependencies via vcpkg. Subsequent builds use the local binary cache.
 
+⸻
+
+## 🚀 One-Click Launcher
+
+For the fastest way to see everything working:
+
+1. **Open Finder** → Navigate to `JUCE-Audio-Service/scripts/`
+2. **Double-click** `one_click.command`
+3. **Watch it run**: The script will automatically:
+   - Build the project with gRPC enabled (arm64, Release)
+   - Start the audio engine server on port 50051
+   - Generate a voice fixture
+   - Render a 250ms voice clip
+   - Create and apply a minimal EDL
+   - Render a 250ms EDL window
+   - Display SHA256 checksums for both outputs
+   - Open the `out/` folder in Finder with the rendered files
+
+**Output files:**
+- `out/voice_0_250ms.wav` — Basic file render
+- `out/edl_demo_0_025ms.wav` — EDL window render
+
+**Troubleshooting:**
+- If anything fails, check `.run/server.log` for details
+- The script will automatically open the log in Finder on server startup failure
+- First run takes longer due to vcpkg dependency downloads
+- The server is automatically cleaned up when the script exits
+
+**Customization:**
+Edit environment variables at the top of `scripts/one_click.sh`:
+```bash
+PORT=50051              # Server port
+BUILD_TYPE=Release      # or Debug
+JOBS=8                  # Parallel build jobs
+BIT_DEPTH=16           # Audio bit depth (16|24|32)
+RENDER_DUR_SEC=0.25    # Render duration in seconds
+```
 
 ⸻
 
