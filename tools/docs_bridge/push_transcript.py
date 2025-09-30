@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
 """
-Push transcript (and optional SRT) to Google Doc.
+push_transcript.py — v2.0 (supports_srt=1, signature=PUSH_TRANSCRIPT_HELP_SIGNATURE_V2)
 
-Inserts transcript as fenced code blocks with proper headings.
+Push transcript (and optional SRT) to Google Doc with version stamping.
 """
 
 import argparse
 import sys
-from pathlib import Path
+import pathlib
+from typing import Optional
 
+SIGNATURE = "PUSH_TRANSCRIPT_HELP_SIGNATURE_V2"
+VERSION = "2.0"
+
+# Local import
 from gdocs import GoogleDocsClient
 
 
@@ -19,24 +24,44 @@ def eprint(*args, **kwargs):
 
 def load_text(path: str) -> str:
     """Load text file, raising FileNotFoundError if missing."""
-    p = Path(path)
+    p = pathlib.Path(path)
     if not p.exists() or not p.is_file():
         raise FileNotFoundError(f"File not found: {p}")
     return p.read_text(encoding="utf-8", errors="replace")
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Push transcript (and optional SRT) to Google Doc."
+def build_parser() -> argparse.ArgumentParser:
+    """Build argument parser with signature in description."""
+    ap = argparse.ArgumentParser(
+        description=f"Push transcript (and optional SRT) to Google Doc.\n[signature:{SIGNATURE}]"
     )
-    parser.add_argument("--doc-id", required=True, help="Google Doc ID")
-    parser.add_argument("--title", required=True, help="Section title to insert in the doc")
-    parser.add_argument("--txt", required=True, help="Path to transcript .txt")
-    parser.add_argument("--srt", help="Path to subtitles .srt (optional)")
-    parser.add_argument("--oauth-client", help="Path to OAuth client JSON (optional)")
-    parser.add_argument("--token", help="Path to token JSON (optional)")
-    parser.add_argument("--verbose", action="store_true", help="Verbose logs to stderr")
-    args = parser.parse_args()
+    ap.add_argument("--version", action="store_true", help="Print version and exit")
+    ap.add_argument("--doc-id", required=False, help="Google Doc ID")
+    ap.add_argument("--title", required=False, help="Section title to insert in the doc")
+    ap.add_argument("--txt", required=False, help="Path to transcript .txt")
+    ap.add_argument("--srt", required=False, help="Path to subtitles .srt (optional)")
+    ap.add_argument("--oauth-client", help="Path to OAuth client JSON (optional)")
+    ap.add_argument("--token", help="Path to token JSON (optional)")
+    ap.add_argument("--verbose", action="store_true", help="Verbose logs to stderr")
+    return ap
+
+
+def main() -> int:
+    ap = build_parser()
+    args, unknown = ap.parse_known_args()
+
+    # Handle --version
+    if args.version:
+        print(f"push_transcript.py v{VERSION} supports_srt=1 signature={SIGNATURE}")
+        return 0
+
+    # Strict validation (--help still shows signature even if args missing)
+    required = ["doc_id", "title", "txt"]
+    missing = [k for k in required if getattr(args, k) in (None, "")]
+    if missing:
+        eprint(f"ERROR: Missing required arguments: {', '.join(missing)}")
+        ap.print_help()
+        return 2
 
     try:
         if args.verbose:
@@ -89,12 +114,12 @@ def main() -> int:
         return 0
 
     except FileNotFoundError as e:
-        eprint(f"ERROR: {e}")
+        eprint(f"[push][error] {e}")
         return 1
     except Exception as e:
-        eprint(f"ERROR: {e}")
+        eprint(f"[push][error] {e}")
         return 1
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())

@@ -255,32 +255,70 @@ ok "Transcript: $TXT_PATH"
 
 bold "Step 7/10 — Push transcript to Google Doc"
 
-TRANS_TITLE="$(basename "$AUDIO_PATH")"
+print "Pushing transcript to Google Doc..."
 
-# Verify push script supports --srt (defensive guard)
-if ! python "$REPO_ROOT/tools/docs_bridge/push_transcript.py" --help 2>&1 | grep -q -- '--srt'; then
-  warn "push_transcript.py does not support --srt. Falling back to TXT-only."
-  SRT_ARG=""
-else
-  if [[ -n "$SRT_PATH" && -f "$SRT_PATH" ]]; then
-    SRT_ARG="--srt $SRT_PATH"
-  else
-    SRT_ARG=""
-  fi
+# Self-diagnosing push with version verification
+DIAG_PUSH="$RUN_DIR/diag_push.txt"
+PUSH_SCRIPT="$REPO_ROOT/tools/docs_bridge/push_transcript.py"
+
+echo "[diag] push_script=$PUSH_SCRIPT" > "$DIAG_PUSH"
+echo "[diag] timestamp=$(date)" >> "$DIAG_PUSH"
+
+# Capture help text to verify signature and --srt support
+HELP_TXT=$(python "$PUSH_SCRIPT" --help 2>&1)
+echo "[diag] help_start" >> "$DIAG_PUSH"
+echo "$HELP_TXT" >> "$DIAG_PUSH"
+echo "[diag] help_end" >> "$DIAG_PUSH"
+
+# Validate signature and --srt presence
+SIG_OK=0
+SRT_OK=0
+if echo "$HELP_TXT" | grep -q 'PUSH_TRANSCRIPT_HELP_SIGNATURE_V2'; then
+  SIG_OK=1
+fi
+if echo "$HELP_TXT" | grep -q -- '--srt'; then
+  SRT_OK=1
 fi
 
-print "Pushing transcript to Google Doc..."
-if python "$REPO_ROOT/tools/docs_bridge/push_transcript.py" \
+echo "[diag] signature_ok=$SIG_OK" >> "$DIAG_PUSH"
+echo "[diag] srt_ok=$SRT_OK" >> "$DIAG_PUSH"
+
+# Build SRT argument if supported and file exists
+SRT_ARG=""
+if [[ $SIG_OK -ne 1 ]]; then
+  warn "push_transcript.py signature not detected. Using TXT-only fallback."
+  warn "See $DIAG_PUSH for diagnostics"
+elif [[ $SRT_OK -ne 1 ]]; then
+  warn "push_transcript.py does not support --srt. Using TXT-only."
+elif [[ -n "$SRT_PATH" && -f "$SRT_PATH" ]]; then
+  SRT_ARG="--srt $SRT_PATH"
+else
+  print "Note: No SRT file available, using TXT-only."
+fi
+
+# Extract title (filename without extension)
+TRANS_TITLE="$(basename "${AUDIO_PATH%.*}")"
+
+# Execute push
+set +e
+python "$PUSH_SCRIPT" \
   --doc-id "$DOC_ID" \
   --title "$TRANS_TITLE" \
   --txt "$TXT_PATH" \
-  $SRT_ARG; then
-  ok "Transcript pushed to Google Doc."
-else
-  err "Failed to push transcript to Google Doc"
-  print "Check .run/bridge.log for details"
+  $SRT_ARG
+PUSH_RC=$?
+set -e
+
+echo "[diag] exit_code=$PUSH_RC" >> "$DIAG_PUSH"
+
+if [[ $PUSH_RC -ne 0 ]]; then
+  err "Failed to push transcript to Google Doc (exit code: $PUSH_RC)"
+  print "See diagnostics: $DIAG_PUSH"
+  print "See bridge log: $BRIDGE_LOG"
   exit 1
 fi
+
+ok "Transcript pushed to Google Doc."
 
 bold "Step 8/10 — Generate Python gRPC stubs"
 python -m grpc_tools.protoc \
