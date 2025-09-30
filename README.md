@@ -135,9 +135,10 @@ BRIDGE_PORT=8080        # HTTP dashboard port
 ```
 
 **Troubleshooting:**
-- **First run slow?** Whisper downloads model on first use (~140MB for small.en)
+- **First run slow?** Whisper downloads model on first use (~140MB for small.en). Model download output is captured in `.run/transcribe.log`.
 - **ffmpeg missing?** Script attempts auto-install via Homebrew
-- **Transcription failed?** Check `.run/bridge.log` for Python errors
+- **Transcription failed?** Check `.run/transcribe.log` for stderr output and errors
+- **JSON parsing errors?** All transcription output is now file-based (`.run/transcribe.json`) for bulletproof parsing
 - **OAuth issues?** See `README_docs_bridge.md` for credential setup
 
 ⸻

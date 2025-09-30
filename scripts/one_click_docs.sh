@@ -200,27 +200,54 @@ else
   ok "ffmpeg is available."
 fi
 
-# Transcribe audio
+# Transcribe audio (file-based JSON output)
 TRANS_OUT_DIR="$OUT_DIR/transcripts"
 mkdir -p "$TRANS_OUT_DIR"
 
+TRANS_JSON_FILE="$RUN_DIR/transcribe.json"
+TRANS_LOG_FILE="$RUN_DIR/transcribe.log"
+
 print "Transcribing audio (model: $WHISPER_MODEL)..."
-TRANS_JSON=$(python "$REPO_ROOT/tools/docs_bridge/transcribe.py" \
+python "$REPO_ROOT/tools/docs_bridge/transcribe.py" \
   --audio "$AUDIO_PATH" \
   --out-dir "$TRANS_OUT_DIR" \
-  --model "$WHISPER_MODEL" 2>&1)
+  --model "$WHISPER_MODEL" \
+  --json-out "$TRANS_JSON_FILE" \
+  --quiet 2>"$TRANS_LOG_FILE"
+TRANS_RC=$?
 
-# Validate JSON output
-if ! echo "$TRANS_JSON" | grep -q '"txt"'; then
-  err "Transcription failed"
-  print "$TRANS_JSON"
+# Check for transcription errors
+if [[ $TRANS_RC -ne 0 ]] || [[ ! -s "$TRANS_JSON_FILE" ]]; then
+  err "Transcription failed (exit code: $TRANS_RC)"
+  print "See log: $TRANS_LOG_FILE"
+  [[ -f "$TRANS_LOG_FILE" ]] && tail -n 20 "$TRANS_LOG_FILE"
   exit 1
 fi
 
-# Parse JSON to extract paths
-TXT_PATH=$(echo "$TRANS_JSON" | python3 -c "import sys, json; print(json.loads(sys.stdin.read())['txt'])")
-SRT_PATH=$(echo "$TRANS_JSON" | python3 -c "import sys, json; print(json.loads(sys.stdin.read()).get('srt', ''))")
-TRANS_DUR=$(echo "$TRANS_JSON" | python3 -c "import sys, json; print(json.loads(sys.stdin.read())['duration_sec'])")
+# Parse JSON from file (bulletproof)
+TXT_PATH=$(python3 <<PYEOF
+import json
+with open("$TRANS_JSON_FILE", "r", encoding="utf-8") as f:
+    data = json.load(f)
+print(data["txt"])
+PYEOF
+)
+
+SRT_PATH=$(python3 <<PYEOF
+import json
+with open("$TRANS_JSON_FILE", "r", encoding="utf-8") as f:
+    data = json.load(f)
+print(data.get("srt", ""))
+PYEOF
+)
+
+TRANS_DUR=$(python3 <<PYEOF
+import json
+with open("$TRANS_JSON_FILE", "r", encoding="utf-8") as f:
+    data = json.load(f)
+print(data["duration_sec"])
+PYEOF
+)
 
 ok "Transcription complete (${TRANS_DUR}s)"
 ok "Transcript: $TXT_PATH"
