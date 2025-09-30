@@ -14,7 +14,7 @@ from pathlib import Path
 from queue import Queue
 from typing import Dict, Optional
 
-from flask import Flask, request, jsonify, current_app
+from flask import Flask, request, jsonify, current_app, Response
 
 from edl_io import parse_and_convert, edl_cache, seconds_to_samples
 from gdocs import GoogleDocsClient
@@ -405,6 +405,57 @@ def health():
         'doc_id': current_app.config.get('DOC_ID'),
         'server': current_app.config.get('SERVER_ADDR')
     }), 200
+
+
+@app.get("/")
+def index():
+    """Dashboard showing bridge status and links."""
+    doc_id = current_app.config.get("DOC_ID") or ""
+    server = current_app.config.get("SERVER_ADDR") or "localhost:50051"
+    doc_url = f"https://docs.google.com/document/d/{doc_id}/edit" if doc_id else "#"
+
+    html = f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>JUCE Audio Service – Docs Bridge</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <style>
+    :root {{
+      --fg:#111; --muted:#666; --ok:#0a7; --bg:#fafafa; --card:#fff; --border:#eee;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }}
+    body {{ margin:0; background:var(--bg); color:var(--fg); font-family:var(--sans); }}
+    .wrap {{ max-width:900px; margin:40px auto; padding:0 20px; }}
+    .card {{ background:var(--card); border:1px solid var(--border); border-radius:14px; padding:20px; box-shadow:0 1px 2px rgba(0,0,0,0.03); }}
+    h1 {{ margin:0 0 12px; font-size:22px; }}
+    .grid {{ display:grid; grid-template-columns: 1fr 1fr; gap:14px; margin-top:14px; }}
+    .kv {{ font-family:var(--mono); font-size:14px; padding:10px; background: #fcfcfc; border:1px solid var(--border); border-radius:10px; }}
+    a.button {{ display:inline-block; padding:10px 14px; border-radius:10px; border:1px solid var(--border); text-decoration:none; }}
+    .ok {{ color:var(--ok); font-weight:600; }}
+    .muted {{ color:var(--muted); }}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>Docs Bridge is running <span class="ok">●</span></h1>
+      <div class="grid">
+        <div class="kv">Doc ID: <strong>{doc_id or "—"}</strong></div>
+        <div class="kv">Engine: <strong>{server}</strong></div>
+      </div>
+      <p style="margin-top:16px">
+        <a class="button" href="/health">Health JSON</a>
+        {'<a class="button" href="'+doc_url+'" target="_blank" rel="noopener noreferrer">Open Google Doc</a>' if doc_id else ''}
+        <a class="button" href="https://127.0.0.1:8080" style="display:none">noop</a>
+      </p>
+      <p class="muted">Add an <code>edljson</code> fenced block in the Google Doc to push EDLs automatically.</p>
+    </div>
+  </div>
+</body>
+</html>"""
+    return Response(html, mimetype="text/html")
 
 
 def main():
