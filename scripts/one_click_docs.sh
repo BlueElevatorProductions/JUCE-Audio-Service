@@ -175,7 +175,8 @@ python -m grpc_tools.protoc \
 ok "Python stubs generated at $PY_STUB_DIR"
 
 bold "Step 6/8 — Start Docs Bridge"
-export PYTHONPATH="$REPO_ROOT:$REPO_ROOT/$PY_STUB_DIR:$PYTHONPATH"
+: "${PYTHONPATH:=}"
+export PYTHONPATH="$REPO_ROOT:$REPO_ROOT/$PY_STUB_DIR:${PYTHONPATH}"
 
 cd "$REPO_ROOT/tools/docs_bridge"
 python bridge.py \
