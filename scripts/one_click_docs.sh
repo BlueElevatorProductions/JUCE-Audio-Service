@@ -255,16 +255,20 @@ ok "Transcript: $TXT_PATH"
 
 bold "Step 7/10 — Push transcript to Google Doc"
 
-TRANS_TITLE="Transcript: $(basename "$AUDIO_PATH")"
+TRANS_TITLE="$(basename "$AUDIO_PATH")"
 
-python "$REPO_ROOT/tools/docs_bridge/push_transcript.py" \
+print "Pushing transcript to Google Doc..."
+if python "$REPO_ROOT/tools/docs_bridge/push_transcript.py" \
   --doc-id "$DOC_ID" \
   --title "$TRANS_TITLE" \
   --txt "$TXT_PATH" \
-  ${SRT_PATH:+--srt "$SRT_PATH"} \
-  || { err "Failed to push transcript to Google Doc"; exit 1; }
-
-ok "Transcript appended to Google Doc."
+  ${SRT_PATH:+--srt "$SRT_PATH"}; then
+  ok "Transcript pushed to Google Doc."
+else
+  err "Failed to push transcript to Google Doc"
+  print "Check .run/bridge.log for details"
+  exit 1
+fi
 
 bold "Step 8/10 — Generate Python gRPC stubs"
 python -m grpc_tools.protoc \

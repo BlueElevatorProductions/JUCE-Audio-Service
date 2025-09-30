@@ -2,7 +2,7 @@
 """
 Push transcript to Google Doc.
 
-Appends a heading, transcript text (chunked), and optional SRT block.
+Appends a heading, transcript text (as code block), and optional SRT block.
 """
 
 import argparse
@@ -11,13 +11,10 @@ from pathlib import Path
 
 from gdocs import GoogleDocsClient
 
-CHUNK_SIZE = 8000
 
-
-def chunk_text(text: str, chunk_size: int = CHUNK_SIZE):
-    """Yield chunks of text up to chunk_size characters."""
-    for i in range(0, len(text), chunk_size):
-        yield text[i:i + chunk_size]
+def eprint(*args, **kwargs):
+    """Print to stderr."""
+    print(*args, file=sys.stderr, **kwargs)
 
 
 def main():
@@ -34,10 +31,12 @@ def main():
     # Read transcript text
     txt_path = Path(args.txt)
     if not txt_path.exists():
-        print(f"ERROR: Transcript file not found: {txt_path}", file=sys.stderr)
+        eprint(f"ERROR: Transcript file not found: {txt_path}")
         return 1
 
     text = txt_path.read_text(encoding="utf-8").strip()
+    if not text:
+        eprint("WARN: Transcript text is empty")
 
     # Read SRT if provided
     srt_content = None
@@ -45,41 +44,62 @@ def main():
         srt_path = Path(args.srt)
         if srt_path.exists():
             srt_content = srt_path.read_text(encoding="utf-8")
+        else:
+            eprint(f"WARN: SRT file not found: {srt_path}")
 
     # Authenticate
+    if args.verbose:
+        eprint("Authenticating with Google Docs API...")
+
     client = GoogleDocsClient()
     if not client.authenticate(
         oauth_client_path=args.oauth_client,
         token_override=args.token,
         verbose=args.verbose
     ):
-        print("ERROR: Authentication failed", file=sys.stderr)
+        eprint("ERROR: Authentication failed")
         return 1
 
-    # Append heading
-    error = client.append_heading(args.doc_id, args.title, level=2)
+    # Append main heading
+    if args.verbose:
+        eprint(f"Appending heading: {args.title}")
+
+    error = client.append_heading(args.doc_id, f"Transcript — {args.title}", level=2)
     if error:
-        print(f"ERROR: Failed to append heading: {error}", file=sys.stderr)
+        eprint(f"ERROR: Failed to append heading: {error}")
         return 1
 
-    # Append transcript text (chunked)
+    # Append transcript as text code block
     if text:
-        for chunk in chunk_text(text):
-            error = client.append_paragraph(args.doc_id, chunk)
-            if error:
-                print(f"ERROR: Failed to append transcript chunk: {error}", file=sys.stderr)
-                return 1
-    else:
-        print("WARN: Transcript text is empty", file=sys.stderr)
+        if args.verbose:
+            eprint(f"Appending transcript text ({len(text)} chars)")
 
-    # Append SRT code block
-    if srt_content:
-        error = client.append_code_block(args.doc_id, "srt", srt_content)
+        error = client.append_code_block(args.doc_id, "text", text)
         if error:
-            print(f"ERROR: Failed to append SRT: {error}", file=sys.stderr)
+            eprint(f"ERROR: Failed to append transcript text: {error}")
+            return 1
+    else:
+        eprint("WARN: Skipping empty transcript text")
+
+    # Append SRT subheading and code block if provided
+    if srt_content:
+        if args.verbose:
+            eprint("Appending SRT subtitles")
+
+        # Add subtitle subheading
+        error = client.append_heading(args.doc_id, "Subtitles (.srt)", level=3)
+        if error:
+            eprint(f"ERROR: Failed to append SRT subheading: {error}")
             return 1
 
-    print(f"Transcript appended to doc: {args.doc_id}")
+        # Add SRT code block
+        error = client.append_code_block(args.doc_id, "srt", srt_content)
+        if error:
+            eprint(f"ERROR: Failed to append SRT content: {error}")
+            return 1
+
+    # Success message to stdout
+    print(f"Pushed transcript to document: {args.doc_id}")
     return 0
 
 

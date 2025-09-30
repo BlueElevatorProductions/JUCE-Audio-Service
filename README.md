@@ -118,9 +118,10 @@ Add automatic audio transcription to your Google Docs workflow:
 - Internet connection for first Whisper model download (~140MB for small.en)
 
 **What gets inserted into your Doc:**
-- **Heading**: "Transcript: [filename]"
-- **Full transcript text** (plain text, chunked for large files)
-- **SRT subtitles** (code block with timestamps)
+- **Heading**: "Transcript — [filename]" (H2)
+- **Full transcript text** (fenced code block with `text` language)
+- **Subtitles subheading** (H3) + **SRT subtitles** (fenced code block with `srt` language)
+- Large files may take a moment to upload due to Google Docs API rate limits
 
 **Output files:**
 - `out/transcripts/[filename].txt` — Plain text transcript
