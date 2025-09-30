@@ -189,22 +189,28 @@ cd "$REPO_ROOT"
 ok "Bridge started (PID: $(cat "$BRIDGE_PID"))."
 
 bold "Step 7/8 — Wait for health check"
-print -n "Checking $HEALTH_URL "
-for i in {1..30}; do
-  if curl -sf "$HEALTH_URL" >/dev/null 2>&1; then
-    print ""
-    ok "Bridge is healthy!"
+echo "Checking http://127.0.0.1:8080/health ..."
+READY=0
+for i in {1..60}; do
+  if curl -fsS http://127.0.0.1:8080/health >/dev/null 2>&1; then
+    READY=1
+    echo "Bridge health OK."
+    break
+  fi
+  if grep -q "All services started" "$BRIDGE_LOG"; then
+    READY=1
+    echo "Bridge ready (log confirmed)."
     break
   fi
   printf "."
   sleep 1
-  if [[ $i -eq 30 ]]; then
-    print ""
-    err "Health check timeout. Check $BRIDGE_LOG"
-    tail -n 50 "$BRIDGE_LOG" || true
-    exit 1
-  fi
 done
+echo
+
+if [ "$READY" -ne 1 ]; then
+  echo "Health check timeout. Check $BRIDGE_LOG"
+  exit 1
+fi
 
 bold "Step 8/8 — Open dashboard & doc"
 DOC_FULL_URL="https://docs.google.com/document/d/$DOC_ID/edit"
