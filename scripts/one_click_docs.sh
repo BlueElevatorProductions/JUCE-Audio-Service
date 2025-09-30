@@ -257,12 +257,24 @@ bold "Step 7/10 — Push transcript to Google Doc"
 
 TRANS_TITLE="$(basename "$AUDIO_PATH")"
 
+# Verify push script supports --srt (defensive guard)
+if ! python "$REPO_ROOT/tools/docs_bridge/push_transcript.py" --help 2>&1 | grep -q -- '--srt'; then
+  warn "push_transcript.py does not support --srt. Falling back to TXT-only."
+  SRT_ARG=""
+else
+  if [[ -n "$SRT_PATH" && -f "$SRT_PATH" ]]; then
+    SRT_ARG="--srt $SRT_PATH"
+  else
+    SRT_ARG=""
+  fi
+fi
+
 print "Pushing transcript to Google Doc..."
 if python "$REPO_ROOT/tools/docs_bridge/push_transcript.py" \
   --doc-id "$DOC_ID" \
   --title "$TRANS_TITLE" \
   --txt "$TXT_PATH" \
-  ${SRT_PATH:+--srt "$SRT_PATH"}; then
+  $SRT_ARG; then
   ok "Transcript pushed to Google Doc."
 else
   err "Failed to push transcript to Google Doc"
